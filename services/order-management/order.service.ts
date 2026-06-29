@@ -22,6 +22,8 @@ function listEndpoint(scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') {
 export const orderService = {
   async waiters(search = '') { const res = await api.get('/cashier/waiters-lite', { params: clean({ search }) }); return rows<LiteUser>(res.data); },
   async orders(params: OrderFilters = {}, scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') { const res = await api.get(listEndpoint(scope), { params: clean(params) }); return page<Order>(res.data); },
+  async cashierPayments(params: OrderFilters = {}) { const res = await api.get('/cashier/payments', { params: clean(params) }); return page<any>(res.data); },
+  async cashierSoldItems(params: OrderFilters = {}) { const res = await api.get('/cashier/payments/sold-items', { params: clean(params) }); return page<any>(res.data); },
   async order(id: string|number, scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') {
     const endpoints = scope === 'waiter'
       ? [`/waiter/orders/${id}`, `/admin/orders/${id}`, `/orders/${id}`]

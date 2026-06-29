@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ScanLine, Plus, Trash2, ArrowLeft } from "lucide-react";
+import { ScanLine, Plus, Trash2, ArrowLeft, Printer, ReceiptText, ChefHat, Wine } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,10 +16,85 @@ import { useMenuItemsQuery } from "@/hooks/queries/menu-management";
 import { useTablesQuery } from "@/hooks/queries/table-management";
 import { useCreditAccountsQuery, useWaitersLiteQuery } from "@/hooks/queries/order-management";
 import { useCreateOrderMutation } from "@/hooks/mutations/order-management";
-import type { OrderItemPayload } from "@/types/order-management";
+import type { Order, OrderItemPayload } from "@/types/order-management";
+import { printBarTicket, printCustomerOrderTicket, printKitchenTicket, printOrderBill } from "@/components/order-management/order-print-utils";
 
 function money(value: unknown) {
   return Number(value ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function normalizeCreatedOrder(value: unknown): Order | undefined {
+  const response = value as any;
+  return response?.data?.order ?? response?.data ?? response?.order ?? response;
+}
+
+function buildPrintableOrderFromSelection({
+  created,
+  submittedPayload,
+  submittedItems,
+  menuItems,
+  tables,
+  waiters,
+  total,
+}: {
+  created?: Order;
+  submittedPayload: any;
+  submittedItems: OrderItemPayload[];
+  menuItems: any[];
+  tables: any[];
+  waiters: any[];
+  total: number;
+}): Order {
+  const printable: any = { ...(created ?? {}) };
+
+  if (!printable.items?.length && !printable.order_items?.length) {
+    printable.items = submittedItems.map((item) => {
+      const menu = menuItems.find((menuItem) => String(menuItem.id) === String(item.menu_item_id));
+      const quantity = Number(item.quantity ?? 0);
+      const unitPrice = Number(menu?.price ?? 0);
+
+      return {
+        menu_item_id: item.menu_item_id,
+        menu_item: menu,
+        quantity,
+        unit_price: unitPrice,
+        line_total: quantity * unitPrice,
+        station: String(menu?.type ?? "food").toLowerCase() === "drink" ? "bar" : "kitchen",
+        item_status: "confirmed",
+        notes: item.notes ?? item.note ?? null,
+        modifiers: item.modifiers ?? [],
+      };
+    });
+  }
+
+  printable.order_type = printable.order_type ?? submittedPayload.order_type;
+  printable.payment_type = printable.payment_type ?? submittedPayload.payment_type;
+  printable.table_id = printable.table_id ?? submittedPayload.table_id;
+  printable.waiter_id = printable.waiter_id ?? submittedPayload.waiter_id;
+  printable.notes = printable.notes ?? submittedPayload.notes;
+  printable.total = printable.total ?? printable.total_amount ?? total;
+  printable.status = printable.status ?? "confirmed";
+  printable.created_at = printable.created_at ?? new Date().toISOString();
+
+  if (!printable.table && submittedPayload.table_id) {
+    printable.table = tables.find((table) => String(table.id) === String(submittedPayload.table_id)) ?? null;
+  }
+
+  if (!printable.waiter && submittedPayload.waiter_id) {
+    printable.waiter = waiters.find((waiter) => String(waiter.id) === String(submittedPayload.waiter_id)) ?? null;
+  }
+
+  if (!printable.bill) {
+    printable.bill = {
+      bill_number: `BILL-${printable.order_number ?? printable.id ?? "NEW"}`,
+      total,
+      paid_amount: 0,
+      balance: total,
+      status: submittedPayload.payment_type === "credit" ? "issued" : "issued",
+    };
+  }
+
+  return printable as Order;
 }
 
 function parseCreditScan(raw: string) {
@@ -43,6 +119,8 @@ export default function CashierPosCreateOrderPage() {
     notes: "",
   });
   const [items, setItems] = useState<OrderItemPayload[]>([]);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [printDialogOpen, setPrintDialogOpen] = useState(false);
 
   const menuQuery = useMenuItemsQuery({ per_page: 200, available: 1, is_available: 1, active: 1, is_active: 1, search: menuSearch }, "cashier");
   const tablesQuery = useTablesQuery({ per_page: 100, status: "available", is_active: 1 }, "cashier");
@@ -100,15 +178,37 @@ export default function CashierPosCreateOrderPage() {
       toast.error(isCredit && total > remainingLimit ? "Credit limit exceeded" : "Complete waiter, table when dine-in, credit user, and order items");
       return;
     }
-    create.mutate({
+    const submittedPayload = {
       ...payload,
       table_id: payload.table_id || null,
       waiter_id: payload.waiter_id || null,
       credit_account_id: isCredit ? payload.credit_account_id : null,
       credit_account_user_id: isCredit ? payload.credit_account_user_id : null,
       items,
-    } as any, {
-      onSuccess: () => toast.success("Order created successfully"),
+    };
+    const submittedItems = [...items];
+    const menuSnapshot = [...menuItems];
+    const tableSnapshot = [...tables];
+    const waiterSnapshot = [...waiters];
+    const submittedTotal = total;
+
+    create.mutate(submittedPayload as any, {
+      onSuccess: (response) => {
+        const normalized = normalizeCreatedOrder(response);
+        const printable = buildPrintableOrderFromSelection({
+          created: normalized,
+          submittedPayload,
+          submittedItems,
+          menuItems: menuSnapshot,
+          tables: tableSnapshot,
+          waiters: waiterSnapshot,
+          total: submittedTotal,
+        });
+
+        setCreatedOrder(printable);
+        setPrintDialogOpen(true);
+        toast.success("Order created successfully. Print tickets and bill now.");
+      },
       onError: (error) => toast.error(error instanceof Error ? error.message : "Failed to create order"),
     });
   }
@@ -148,6 +248,61 @@ export default function CashierPosCreateOrderPage() {
           <Card className="rounded-2xl"><CardHeader><CardTitle>Selected items</CardTitle></CardHeader><CardContent><div className="overflow-x-auto rounded-xl border"><Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qty</TableHead><TableHead>Total</TableHead><TableHead /></TableRow></TableHeader><TableBody>{items.length ? items.map((item) => { const menu = menuItems.find((m: any) => String(m.id) === String(item.menu_item_id)); const line = Number(menu?.price ?? 0) * item.quantity; return <TableRow key={String(item.menu_item_id)}><TableCell>{menu?.name ?? item.menu_item_id}</TableCell><TableCell><Input className="w-24" type="number" min="1" value={item.quantity} onChange={(event) => updateQty(item.menu_item_id, Number(event.target.value))} /></TableCell><TableCell>{money(line)}</TableCell><TableCell className="text-right"><Button variant="ghost" size="icon" onClick={() => updateQty(item.menu_item_id, 0)}><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>; }) : <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No items selected.</TableCell></TableRow>}</TableBody></Table></div></CardContent></Card>
         </div>
       </div>
+
+      <Dialog open={printDialogOpen} onOpenChange={setPrintDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Order created successfully</DialogTitle>
+            <DialogDescription>
+              Print customer order ticket, kitchen ticket, bar ticket, and bill immediately.
+              These are available without waiting for kitchen/bar status changes.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-2xl border bg-muted/30 p-4">
+            <div className="grid gap-3 md:grid-cols-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Order number</p>
+                <p className="font-semibold">{createdOrder?.order_number ?? `#${createdOrder?.id ?? "NEW"}`}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Order type</p>
+                <p className="font-semibold capitalize">{String(createdOrder?.order_type ?? payload.order_type).replace(/_/g, " ")}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Bill total</p>
+                <p className="font-semibold">{money(createdOrder?.total ?? createdOrder?.total_amount ?? total)}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <Button variant="outline" disabled={!createdOrder} onClick={() => createdOrder && printCustomerOrderTicket(createdOrder)}>
+              <Printer className="mr-2 h-4 w-4" />
+              Print order ticket
+            </Button>
+            <Button variant="outline" disabled={!createdOrder} onClick={() => createdOrder && printKitchenTicket(createdOrder)}>
+              <ChefHat className="mr-2 h-4 w-4" />
+              Print kitchen ticket
+            </Button>
+            <Button variant="outline" disabled={!createdOrder} onClick={() => createdOrder && printBarTicket(createdOrder)}>
+              <Wine className="mr-2 h-4 w-4" />
+              Print bar ticket
+            </Button>
+            <Button disabled={!createdOrder} onClick={() => createdOrder && printOrderBill(createdOrder)}>
+              <ReceiptText className="mr-2 h-4 w-4" />
+              Print bill
+            </Button>
+          </div>
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/order-management/pos/orders">View all POS orders</Link>
+            </Button>
+            <Button onClick={() => setPrintDialogOpen(false)}>Continue taking orders</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

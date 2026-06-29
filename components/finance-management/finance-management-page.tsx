@@ -59,14 +59,14 @@ function listBase(scope: Scope, resource: "bills" | "receipts") {
     return resource === "bills" ? "/cashier/bills" : "/cashier/payments";
   }
 
-  return resource === "bills" ? "/bills" : "/payments";
+  return resource === "bills" ? "/admin/bills" : "/admin/payments";
 }
 
-async function fetchList<T>(scope: Scope, resource: "bills" | "receipts", search: string) {
+async function fetchList<T>(scope: Scope, resource: "bills" | "receipts", search: string, status?: string) {
   const res = await api.get(listBase(scope, resource), {
     params: {
       search: search || undefined,
-      status: resource === "receipts" ? "paid" : undefined,
+      status: resource === "receipts" ? "paid" : status,
       per_page: 20,
     },
   });
@@ -82,11 +82,11 @@ function statusVariant(status?: string | null) {
   return "outline";
 }
 
-function BillsTab({ scope }: { scope: Scope }) {
+function BillsTab({ scope, statusFilter }: { scope: Scope; statusFilter?: string }) {
   const [search, setSearch] = useState("");
   const { data = [], isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["finance-management", scope, "bills", search],
-    queryFn: () => fetchList<Bill>(scope, "bills", search),
+    queryKey: ["finance-management", scope, "bills", search, statusFilter],
+    queryFn: () => fetchList<Bill>(scope, "bills", search, statusFilter),
   });
 
   const totals = useMemo(() => data.reduce(
@@ -112,7 +112,7 @@ function BillsTab({ scope }: { scope: Scope }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><WalletCards className="h-5 w-5" /> Bills</CardTitle>
-          <CardDescription>Issued, partial, paid, void, and refunded bills.</CardDescription>
+          <CardDescription>{statusFilter === "paid" ? "Paid bills stored after successful payment records." : "Issued, partial, paid, void, and refunded bills."}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -227,7 +227,7 @@ function ReceiptsTab({ scope }: { scope: Scope }) {
   );
 }
 
-export function FinanceManagementPage({ scope = "admin" }: { scope?: Scope }) {
+export function FinanceManagementPage({ scope = "admin", initialTab = "payments", billStatus }: { scope?: Scope; initialTab?: "payments" | "bills" | "receipts"; billStatus?: string }) {
   return (
     <div className="space-y-6">
       <div>
@@ -235,7 +235,7 @@ export function FinanceManagementPage({ scope = "admin" }: { scope?: Scope }) {
         <p className="text-muted-foreground">Manage payments, bills, and receipts from one page.</p>
       </div>
 
-      <Tabs defaultValue="payments" className="space-y-4">
+      <Tabs defaultValue={initialTab} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-3 md:w-fit">
           <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="bills">Bills</TabsTrigger>
@@ -247,7 +247,7 @@ export function FinanceManagementPage({ scope = "admin" }: { scope?: Scope }) {
         </TabsContent>
 
         <TabsContent value="bills" className="space-y-4">
-          <BillsTab scope={scope} />
+          <BillsTab scope={scope} statusFilter={billStatus} />
         </TabsContent>
 
         <TabsContent value="receipts" className="space-y-4">
