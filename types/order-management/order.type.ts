@@ -56,6 +56,7 @@ export type OrderFilters = {
   date_from?: string;
   date_to?: string;
   credit_account_id?: Id;
+  waiter_id?: Id | string;
   page?: number;
   per_page?: number;
   active?: boolean | number | string;

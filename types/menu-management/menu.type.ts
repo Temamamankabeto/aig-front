@@ -1,7 +1,5 @@
 export type MenuType = "food" | "drink";
 export type MenuMode = "normal" | "spatial";
-export type InventoryTrackingMode = "recipe" | "direct" | "none";
-
 export type PaginationMeta = {
   current_page: number;
   per_page: number;
@@ -49,9 +47,6 @@ export type MenuItem = {
   is_available: boolean | number;
   is_active: boolean | number;
   menu_mode?: MenuMode;
-  has_ingredients?: boolean | number;
-  inventory_tracking_mode?: InventoryTrackingMode;
-  direct_inventory_item_id?: number | string | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -94,8 +89,5 @@ export type MenuItemPayload = {
   is_available?: boolean;
   is_active?: boolean;
   menu_mode?: MenuMode;
-  has_ingredients?: boolean;
-  inventory_tracking_mode?: InventoryTrackingMode;
-  direct_inventory_item_id?: number | string | null;
   image?: File | null;
 };
