@@ -184,7 +184,12 @@ export type Order = {
   waiter_id?: Id | null;
   waiter?: LiteUser | null;
   customer_id?: Id | null;
-  customer?: { id: Id; name?: string; phone?: string } | null;
+  customer?: {
+  id: Id;
+  name?: string;
+  phone?: string;
+  tin?: string;   // ✅ add this
+} | null;
   customer_name?: string | null;
   customer_phone?: string | null;
   customer_address?: string | null;

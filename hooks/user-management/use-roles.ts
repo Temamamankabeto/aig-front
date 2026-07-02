@@ -1,7 +1,8 @@
+"use client";
+
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { roleService } from "@/services/user-management/role.service";
-import { queryKeys } from "@/hooks/queryKeys";
+import { userManagementKeys } from "./use-users";
 
 import type {
   AssignRolePermissionsPayload,
@@ -11,55 +12,78 @@ import type {
 
 export function useRolesQuery(params: RoleListParams = {}) {
   return useQuery({
-    queryKey: queryKeys.roles.list(params),
+    queryKey: userManagementKeys.rolesList(params),
     queryFn: () => roleService.list(params),
+  });
+}
+export function useAvailableRolePermissionsQuery(search?: string) {
+  return useQuery({
+    queryKey: userManagementKeys.availableRolePermissions(search),
+    queryFn: () => roleService.permissionCatalog(),
   });
 }
 
 export function useRolePermissionsQuery(id?: number | string) {
   return useQuery({
-    queryKey: queryKeys.roles.permissions(id ?? ""),
+    queryKey: userManagementKeys.rolePermissions(id ?? "none"),
     queryFn: () => roleService.rolePermissions(id as number | string),
-    enabled: Boolean(id),
+    enabled: !!id,
   });
 }
 
-export function useCreateRoleMutation(onSuccess?: () => void) {
+export function useCreateRoleMutation() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: RolePayload) => roleService.create(payload),
+    mutationFn: (payload: RolePayload) =>
+      roleService.create(payload),
+
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.roles.root() });
-      toast.success("Role created");
-      onSuccess?.();
+      qc.invalidateQueries({
+        queryKey: userManagementKeys.roles(),
+      });
     },
   });
 }
 
-export function useUpdateRoleMutation(onSuccess?: () => void) {
+export function useUpdateRoleMutation() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: RolePayload }) => roleService.update(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: RolePayload;
+    }) => roleService.update(id, payload),
+
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.roles.root() });
-      toast.success("Role updated");
-      onSuccess?.();
+      qc.invalidateQueries({
+        queryKey: userManagementKeys.roles(),
+      });
     },
   });
 }
 
-export function useAssignRolePermissionsMutation(onSuccess?: () => void) {
+export function useAssignRolePermissionsMutation() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: AssignRolePermissionsPayload }) =>
-      roleService.assignPermissions(id, payload),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.roles.permissions("all") });
-      toast.success("Permissions assigned");
-      onSuccess?.();
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: AssignRolePermissionsPayload;
+    }) => roleService.assignPermissions(id, payload),
+
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({
+        queryKey: userManagementKeys.rolePermissions(
+          variables.id
+        ),
+      });
     },
   });
 }

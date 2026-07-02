@@ -14,7 +14,11 @@ import { formatBaseQuantity } from "@/lib/inventory-management";
 import { useCreateRecipeMutation, useUpdateRecipeMutation, useInventoryItemsQuery, useMenuItemsQuery, useRecipesQuery } from "@/hooks/inventory-management";
 import type { BaseUnit, InventoryItem, RecipeIngredient, Recipe } from "@/types/inventory-management";
 
-type Scope = "admin" | "food-controller" | "stock-keeper";
+type Scope =
+  | "admin"
+  | "food-controller"
+  | "stock-keeper"
+  | "purchaser";
 
 type DraftIngredient = RecipeIngredient & {
   inventory_item: InventoryItem;
@@ -45,7 +49,11 @@ function recipeItems(recipe: Recipe) {
 }
 
 function menuType(recipe: Recipe): string {
-  return String(recipe.menu_item?.type ?? "").toLowerCase();
+  const menuItem = recipe.menu_item as
+    | { type?: string }
+    | undefined;
+
+  return String(menuItem?.type ?? "").toLowerCase();
 }
 
 function menuCategory(recipe: Recipe): string {

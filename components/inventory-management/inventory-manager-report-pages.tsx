@@ -30,7 +30,7 @@ function pageTitle(icon: typeof BarChart3, title: string, description: string) {
 }
 
 function itemUnit(item?: Pick<InventoryItem, "base_unit" | "unit"> | null) {
-  return item?.base_unit ?? item?.unit ?? "pc";
+  return item?.base_unit ?? item?.unit ?? "pcs";
 }
 
 function itemName(item?: Pick<InventoryItem, "name" | "sku"> | null) {

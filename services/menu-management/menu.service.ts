@@ -10,12 +10,20 @@ import type {
   PaginatedResponse,
 } from "@/types/menu-management";
 
-function cleanParams(params: Record<string, unknown> = {}) {
+function cleanParams<T extends object>(params: T) {
   const output: Record<string, unknown> = {};
-  Object.entries(params).forEach(([key, value]) => {
-    if (value === undefined || value === null || value === "" || value === "all") return;
-    output[key] = value;
+
+  Object.entries(params as object).forEach(([key, value]) => {
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== "" &&
+      value !== "all"
+    ) {
+      output[key] = value;
+    }
   });
+
   return output;
 }
 
@@ -46,7 +54,12 @@ function extractMeta(body: unknown, rowsLength: number) {
 }
 
 function paginated<T>(body: unknown): PaginatedResponse<T> {
-  const root = body as { success?: boolean; message?: string };
+const root = body as {
+  success?: boolean;
+  message?: string;
+  data?: unknown;
+  meta?: Record<string, unknown>;
+} | null;
   const rows = extractRows<T>(body);
   return {
     success: root?.success,

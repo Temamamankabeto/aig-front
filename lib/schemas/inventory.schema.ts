@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const baseUnitSchema = z.enum(["g", "ml", "pc"]);
+export const baseUnitSchema = z.enum(["g", "ml", "pcs"]);
 
 export const inventoryItemSchema = z.object({
   name: z.string().min(2, "Item name is required"),

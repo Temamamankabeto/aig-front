@@ -37,7 +37,7 @@ function PoLinesTable({ lines }: { lines: PurchaseOrderItemRow[] }) {
       <TableBody>
         {lines.map((line) => {
           const inv = line.inventory_item ?? line.inventoryItem;
-          const unit = inv?.base_unit ?? line.unit ?? "pc";
+          const unit = inv?.base_unit ?? line.unit ?? "pcs";
           return <TableRow key={line.id}><TableCell className="font-medium">{poItemName(line)}</TableCell><TableCell>{formatBaseQuantity(line.quantity, unit)}</TableCell><TableCell>{formatBaseQuantity(line.received_quantity ?? 0, unit)}</TableCell><TableCell>{formatMoney(line.unit_cost)} ETB</TableCell></TableRow>;
         })}
       </TableBody>
@@ -79,8 +79,18 @@ function ConfirmValidationDialog({ po }: { po: PurchaseOrderRow }) {
     onError: (error) => toast.error(extractError(error, "Failed to reject purchase request")),
   });
 
-  const summary = integrity.data?.summary ?? {};
-  const issueCount = Object.values(summary).reduce((sum, value) => sum + Number(value ?? 0), 0);
+const summary = (integrity.data?.summary ?? {}) as Record<string, unknown>;
+
+const issueCount = Object.values(summary).reduce<number>((sum, value) => {
+  const num =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : 0;
+
+  return sum + (Number.isFinite(num) ? num : 0);
+}, 0);
 
   return (
     <>

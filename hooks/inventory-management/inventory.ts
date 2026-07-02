@@ -98,12 +98,7 @@ export function useRecipeIntegrityQuery(scope: InventoryRoleScope = "food-contro
   });
 }
 
-export function useStockStatusSummaryQuery(scope: InventoryRoleScope = "food-controller") {
-  return useQuery({
-    queryKey: queryKeys.inventory.summary(scope),
-    queryFn: () => inventoryService.stockStatusSummary(scope),
-  });
-}
+
 
 export function useCreateInventoryItemMutation(onSuccess?: () => void, scope: InventoryRoleScope = "admin") {
   const queryClient = useQueryClient();

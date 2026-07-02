@@ -16,12 +16,24 @@ import {
   useUpdateTableMutation,
 } from "@/hooks/table-management/table";
 
-const statuses: TableStatus[] = ["available", "occupied", "reserved", "cleaning", "out_of_service"];
+const statuses: TableStatus[] = [
+  "available",
+  "occupied",
+  "reserved",
+  "cleaning",
+  "out_of_service",
+];
 
 function boolValue(value: unknown, fallback = true) {
   if (value === undefined || value === null) return fallback;
   return value === true || value === 1 || value === "1";
 }
+
+type UserItem = {
+  id: number | string;
+  name: string;
+  email: string;
+};
 
 export function TableFormModal({
   open,
@@ -33,9 +45,11 @@ export function TableFormModal({
   table?: DiningTable | null;
 }) {
   const isEdit = Boolean(table?.id);
+
   const { data: waiters = [] } = useTableWaitersQuery();
   const createMutation = useCreateTableMutation(() => onOpenChange(false));
   const updateMutation = useUpdateTableMutation(() => onOpenChange(false));
+
   const [form, setForm] = useState<TablePayload>({
     table_number: "",
     name: "",
@@ -50,6 +64,7 @@ export function TableFormModal({
 
   useEffect(() => {
     if (!open) return;
+
     setForm({
       table_number: table?.table_number ?? table?.number ?? "",
       name: table?.name ?? "",
@@ -59,31 +74,42 @@ export function TableFormModal({
       is_active: boolValue(table?.is_active ?? table?.active, true),
       is_public: boolValue(table?.is_public, true),
       sort_order: Number(table?.sort_order ?? 0),
-      waiter_ids: table?.waiters?.map((waiter) => waiter.id) ?? (table?.waiter_id ? [table.waiter_id] : []),
+      waiter_ids:
+        table?.waiters?.map((w) => w.id) ??
+        (table?.waiter_id ? [table.waiter_id] : []),
     });
   }, [open, table]);
 
   function toggleWaiter(id: number | string) {
-    const current = form.waiter_ids ?? [];
-    setForm((prev) => ({
-      ...prev,
-      waiter_ids: current.includes(id) ? current.filter((item) => item !== id) : [id],
-    }));
+    setForm((prev) => {
+      const current = prev.waiter_ids ?? [];
+
+      return {
+        ...prev,
+        waiter_ids: current.includes(id)
+          ? current.filter((x) => x !== id)
+          : [...current, id],
+      };
+    });
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const firstWaiterId = form.waiter_ids?.[0] ?? null;
+
     const payload: TablePayload = {
       ...form,
       capacity: Number(form.capacity || 1),
       sort_order: Number(form.sort_order ?? 0),
       name: form.name || null,
       section: form.section || null,
-      waiter_id: firstWaiterId,
+      waiter_id: form.waiter_ids?.[0] ?? null,
     };
-    if (isEdit && table?.id) updateMutation.mutate({ id: table.id, payload });
-    else createMutation.mutate(payload);
+
+    if (isEdit && table?.id) {
+      updateMutation.mutate({ id: table.id, payload });
+    } else {
+      createMutation.mutate(payload);
+    }
   }
 
   const pending = createMutation.isPending || updateMutation.isPending;
@@ -91,64 +117,155 @@ export function TableFormModal({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
-        <DialogHeader><DialogTitle>{isEdit ? "Edit table" : "Create table"}</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Edit table" : "Create table"}</DialogTitle>
+        </DialogHeader>
+
         <form onSubmit={submit} className="space-y-4">
+          {/* TABLE FIELDS */}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Table number</Label>
-              <Input value={String(form.table_number ?? "")} onChange={(e) => setForm({ ...form, table_number: e.target.value })} required placeholder="T-01" />
+              <Input
+                value={String(form.table_number ?? "")}
+                onChange={(e) =>
+                  setForm({ ...form, table_number: e.target.value })
+                }
+                required
+              />
             </div>
+
             <div className="space-y-2">
               <Label>Name</Label>
-              <Input value={String(form.name ?? "")} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Family Table" />
+              <Input
+                value={String(form.name ?? "")}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
             </div>
+
             <div className="space-y-2">
               <Label>Capacity</Label>
-              <Input type="number" min={1} value={String(form.capacity ?? 1)} onChange={(e) => setForm({ ...form, capacity: Number(e.target.value) })} required />
+              <Input
+                type="number"
+                min={1}
+                value={String(form.capacity ?? 1)}
+                onChange={(e) =>
+                  setForm({ ...form, capacity: Number(e.target.value) })
+                }
+              />
             </div>
+
             <div className="space-y-2">
               <Label>Section</Label>
-              <Input value={String(form.section ?? "")} onChange={(e) => setForm({ ...form, section: e.target.value })} placeholder="Indoor / Outdoor" />
+              <Input
+                value={String(form.section ?? "")}
+                onChange={(e) =>
+                  setForm({ ...form, section: e.target.value })
+                }
+              />
             </div>
+
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select value={String(form.status ?? "available")} onValueChange={(value) => setForm({ ...form, status: value as TableStatus })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{statuses.map((status) => <SelectItem key={status} value={status}>{status.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
+              <Select
+                value={String(form.status ?? "available")}
+                onValueChange={(value) =>
+                  setForm({ ...form, status: value as TableStatus })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {statuses.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status.replace(/_/g, " ")}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
               <Label>Sort order</Label>
-              <Input type="number" value={String(form.sort_order ?? 0)} onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+              <Input
+                type="number"
+                value={String(form.sort_order ?? 0)}
+                onChange={(e) =>
+                  setForm({ ...form, sort_order: Number(e.target.value) })
+                }
+              />
             </div>
           </div>
 
+          {/* FLAGS */}
           <div className="grid gap-3 md:grid-cols-2">
             <label className="flex items-center gap-2 rounded-xl border p-3">
-              <Checkbox checked={Boolean(form.is_active)} onCheckedChange={(v) => setForm({ ...form, is_active: Boolean(v) })} />
+              <Checkbox
+                checked={Boolean(form.is_active)}
+                onCheckedChange={(v) =>
+                  setForm({ ...form, is_active: Boolean(v) })
+                }
+              />
               <span className="text-sm">Active</span>
             </label>
+
             <label className="flex items-center gap-2 rounded-xl border p-3">
-              <Checkbox checked={Boolean(form.is_public)} onCheckedChange={(v) => setForm({ ...form, is_public: Boolean(v) })} />
-              <span className="text-sm">Visible for public/customer</span>
+              <Checkbox
+                checked={Boolean(form.is_public)}
+                onCheckedChange={(v) =>
+                  setForm({ ...form, is_public: Boolean(v) })
+                }
+              />
+              <span className="text-sm">Visible</span>
             </label>
           </div>
 
+          {/* WAITERS */}
           <div className="space-y-2">
-            <Label>Assigned waiter</Label>
+            <Label>Assigned waiters</Label>
+
             <div className="grid max-h-44 gap-2 overflow-auto rounded-xl border p-3 md:grid-cols-2">
-              {waiters.length ? waiters.map((waiter) => (
-                <label key={String(waiter.id)} className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={(form.waiter_ids ?? []).includes(waiter.id)} onCheckedChange={() => toggleWaiter(waiter.id)} />
-                  {waiter.name ?? waiter.full_name ?? waiter.email ?? `Waiter #${waiter.id}`}
-                </label>
-              )) : <p className="text-sm text-muted-foreground">No waiter list found.</p>}
+              {waiters.length ? (
+                waiters.map((waiter: UserItem) => {
+                  const label =
+                    waiter.name ??
+                    waiter.email ??
+                    `Waiter #${waiter.id}`;
+
+                  return (
+                    <label
+                      key={String(waiter.id)}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={(form.waiter_ids ?? []).includes(waiter.id)}
+                        onCheckedChange={() => toggleWaiter(waiter.id)}
+                      />
+                      {label}
+                    </label>
+                  );
+                })
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No waiter list found.
+                </p>
+              )}
             </div>
           </div>
 
+          {/* ACTIONS */}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={pending}>{pending ? "Saving..." : "Save table"}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving..." : "Save table"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

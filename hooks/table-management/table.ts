@@ -1,34 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
 import { tableService } from "@/services/table-management";
-import type {
-  AssignWaiterPayload,
-  AssignWaitersPayload,
-  BulkAssignTablesPayload,
-  DiningTable,
-  TableFilters,
-  TableListParams,
-  TablePayload,
-  TableStatus,
-  TransferOrdersPayload,
-  TransferTablePayload,
-  TransferWaitersPayload,
-  UpdateTableStatusPayload,
-} from "@/types/table-management";
 
-export type {
-  AssignWaiterPayload,
+import type {
   AssignWaitersPayload,
   BulkAssignTablesPayload,
   DiningTable,
-  PaginatedResponse,
   TableFilters,
-  TableHistoryRow,
   TableListParams,
-  TableOperationalStatus,
   TablePayload,
   TableStatus,
-  TableSummary,
   TableWaiter,
   TransferOrdersPayload,
   TransferTablePayload,
@@ -36,9 +17,50 @@ export type {
   UpdateTableStatusPayload,
 } from "@/types/table-management";
 
-export type TableRoleScope = "admin" | "manager" | "waiter" | "cashier";
+// Re-export types so other files can import them from this hook
+export type {
+  AssignWaitersPayload,
+  BulkAssignTablesPayload,
+  DiningTable,
+  TableFilters,
+  TableListParams,
+  TablePayload,
+  TableStatus,
+  TableWaiter,
+  TransferOrdersPayload,
+  TransferTablePayload,
+  TransferWaitersPayload,
+  UpdateTableStatusPayload,
+};
 
-function invalidateTableQueries(queryClient: ReturnType<typeof useQueryClient>) {
+/**
+ * UI-level role scope (used in frontend logic)
+ */
+export type TableRoleScope =
+  | "admin"
+  | "manager"
+  | "waiter"
+  | "cashier";
+
+/**
+ * API-level role scope (ONLY what backend accepts)
+ */
+type TableApiScope = "admin" | "manager";
+
+/**
+ * Safe mapper from UI scope → API scope
+ */
+function toTableApiScope(scope: TableRoleScope): TableApiScope {
+  return scope === "admin" ? "admin" : "manager";
+}
+
+/* =========================
+   QUERY INVALIDATION
+========================= */
+
+function invalidateTableQueries(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.tables.root() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.tables.summary() }),
@@ -46,10 +68,18 @@ function invalidateTableQueries(queryClient: ReturnType<typeof useQueryClient>) 
   ]);
 }
 
-export function useTablesQuery(params: TableListParams = {}, roleScope: TableRoleScope = "admin") {
+/* =========================
+   QUERIES
+========================= */
+
+export function useTablesQuery(
+  params: TableListParams = {},
+  roleScope: TableRoleScope = "admin",
+) {
   return useQuery({
     queryKey: queryKeys.tables.list(params, roleScope),
-    queryFn: () => tableService.list(params, roleScope),
+    queryFn: () =>
+      tableService.list(params, toTableApiScope(roleScope)),
   });
 }
 
@@ -68,17 +98,23 @@ export function useTableQuery(id?: number | string) {
   });
 }
 
-export function useTableSummaryQuery(roleScope: TableRoleScope = "manager") {
+export function useTableSummaryQuery(
+  roleScope: TableRoleScope = "manager",
+) {
   return useQuery({
     queryKey: [...queryKeys.tables.summary(), roleScope],
-    queryFn: () => tableService.summary(roleScope),
+    queryFn: () =>
+      tableService.summary(toTableApiScope(roleScope)),
   });
 }
 
-export function useTableSectionsQuery(roleScope: TableRoleScope = "manager") {
+export function useTableSectionsQuery(
+  roleScope: TableRoleScope = "manager",
+) {
   return useQuery({
     queryKey: [...queryKeys.tables.sections(), roleScope],
-    queryFn: () => tableService.sections(roleScope),
+    queryFn: () =>
+      tableService.sections(toTableApiScope(roleScope)),
   });
 }
 
@@ -97,10 +133,17 @@ export function useTableWaitersQuery(search?: string) {
   });
 }
 
+/* =========================
+   MUTATIONS
+========================= */
+
 export function useCreateTableMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (payload: TablePayload) => tableService.create(payload),
+    mutationFn: (payload: TablePayload) =>
+      tableService.create(payload),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();
@@ -110,11 +153,23 @@ export function useCreateTableMutation(onSuccess?: () => void) {
 
 export function useUpdateTableMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: TablePayload }) => tableService.update(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: TablePayload;
+    }) => tableService.update(id, payload),
+
     onSuccess: async (_data, variables) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(variables.id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(variables.id),
+      });
+
       onSuccess?.();
     },
   });
@@ -122,12 +177,26 @@ export function useUpdateTableMutation(onSuccess?: () => void) {
 
 export function useAssignTableWaiterMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, waiter_id }: { id: number | string; waiter_id: number | string }) =>
-      tableService.assignWaiters(id, { waiter_ids: [waiter_id] }),
+    mutationFn: ({
+      id,
+      waiter_id,
+    }: {
+      id: number | string;
+      waiter_id: number | string;
+    }) =>
+      tableService.assignWaiters(id, {
+        waiter_ids: [waiter_id],
+      }),
+
     onSuccess: async (_data, variables) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(variables.id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(variables.id),
+      });
+
       onSuccess?.();
     },
   });
@@ -135,11 +204,23 @@ export function useAssignTableWaiterMutation(onSuccess?: () => void) {
 
 export function useAssignTableWaitersMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: AssignWaitersPayload }) => tableService.assignWaiters(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: AssignWaitersPayload;
+    }) => tableService.assignWaiters(id, payload),
+
     onSuccess: async (_data, variables) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(variables.id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(variables.id),
+      });
+
       onSuccess?.();
     },
   });
@@ -147,11 +228,18 @@ export function useAssignTableWaitersMutation(onSuccess?: () => void) {
 
 export function useUnassignTableWaiterMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (id: number | string) => tableService.unassignWaiters(id, { waiter_ids: [] }),
+    mutationFn: (id: number | string) =>
+      tableService.unassignWaiters(id, { waiter_ids: [] }),
+
     onSuccess: async (_data, id) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(id),
+      });
+
       onSuccess?.();
     },
   });
@@ -159,9 +247,21 @@ export function useUnassignTableWaiterMutation(onSuccess?: () => void) {
 
 export function useTransferTableMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: TransferTablePayload }) =>
-      tableService.transferOrders(id, { to_table_id: payload.to_table_id, move_waiters: true, note: payload.note }),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: TransferTablePayload;
+    }) =>
+      tableService.transferOrders(id, {
+        to_table_id: payload.to_table_id,
+        move_waiters: true,
+        note: payload.note,
+      }),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();
@@ -171,8 +271,16 @@ export function useTransferTableMutation(onSuccess?: () => void) {
 
 export function useTransferTableWaitersMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: TransferWaitersPayload }) => tableService.transferWaiters(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: TransferWaitersPayload;
+    }) => tableService.transferWaiters(id, payload),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();
@@ -182,8 +290,16 @@ export function useTransferTableWaitersMutation(onSuccess?: () => void) {
 
 export function useTransferTableOrdersMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: TransferOrdersPayload }) => tableService.transferOrders(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: TransferOrdersPayload;
+    }) => tableService.transferOrders(id, payload),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();
@@ -193,11 +309,23 @@ export function useTransferTableOrdersMutation(onSuccess?: () => void) {
 
 export function useSetTableStatusMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, status }: { id: number | string; status: TableStatus }) => tableService.updateStatus(id, { status }),
+    mutationFn: ({
+      id,
+      status,
+    }: {
+      id: number | string;
+      status: TableStatus;
+    }) => tableService.updateStatus(id, { status }),
+
     onSuccess: async (_data, variables) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(variables.id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(variables.id),
+      });
+
       onSuccess?.();
     },
   });
@@ -205,11 +333,23 @@ export function useSetTableStatusMutation(onSuccess?: () => void) {
 
 export function useUpdateTableStatusMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: ({ id, payload }: { id: number | string; payload: UpdateTableStatusPayload }) => tableService.updateStatus(id, payload),
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number | string;
+      payload: UpdateTableStatusPayload;
+    }) => tableService.updateStatus(id, payload),
+
     onSuccess: async (_data, variables) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(variables.id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(variables.id),
+      });
+
       onSuccess?.();
     },
   });
@@ -217,11 +357,18 @@ export function useUpdateTableStatusMutation(onSuccess?: () => void) {
 
 export function useToggleTableActiveMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (id: number | string) => tableService.toggle(id),
+    mutationFn: (id: number | string) =>
+      tableService.toggle(id),
+
     onSuccess: async (_data, id) => {
       await invalidateTableQueries(queryClient);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.tables.detail(id) });
+
+      await queryClient.invalidateQueries({
+        queryKey: queryKeys.tables.detail(id),
+      });
+
       onSuccess?.();
     },
   });
@@ -233,8 +380,11 @@ export function useToggleTableMutation(onSuccess?: () => void) {
 
 export function useDeleteTableMutation(onSuccess?: () => void) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (id: number | string) => tableService.delete(id),
+    mutationFn: (id: number | string) =>
+      tableService.delete(id),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();
@@ -242,10 +392,15 @@ export function useDeleteTableMutation(onSuccess?: () => void) {
   });
 }
 
-export function useBulkAssignTablesToWaiterMutation(onSuccess?: () => void) {
+export function useBulkAssignTablesToWaiterMutation(
+  onSuccess?: () => void,
+) {
   const queryClient = useQueryClient();
+
   return useMutation({
-    mutationFn: (payload: BulkAssignTablesPayload) => tableService.bulkAssignTablesToWaiter(payload),
+    mutationFn: (payload: BulkAssignTablesPayload) =>
+      tableService.bulkAssignTablesToWaiter(payload),
+
     onSuccess: async () => {
       await invalidateTableQueries(queryClient);
       onSuccess?.();

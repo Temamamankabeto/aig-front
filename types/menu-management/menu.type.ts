@@ -1,26 +1,36 @@
 export type MenuType = "food" | "drink";
+
 export type MenuMode = "normal" | "spatial";
-export type PaginationMeta = {
+
+export type MenuRoleScope =
+  | "admin"
+  | "waiter"
+  | "food-controller"
+  | "public";
+
+// 
+  
+export interface PaginationMeta {
   current_page: number;
   per_page: number;
   total: number;
   last_page: number;
-};
+}
 
-export type PaginatedResponse<T> = {
+export interface PaginatedResponse<T> {
   success?: boolean;
   message?: string;
   data: T[];
   meta: PaginationMeta;
-};
+}
 
-export type ApiEnvelope<T> = {
+export interface ApiEnvelope<T> {
   success?: boolean;
   message?: string;
   data: T;
-};
+}
 
-export type MenuCategory = {
+export interface MenuCategory {
   id: number | string;
   name: string;
   description?: string | null;
@@ -31,9 +41,9 @@ export type MenuCategory = {
   menu_items_count?: number;
   created_at?: string;
   updated_at?: string;
-};
+}
 
-export type MenuItem = {
+export interface MenuItem {
   id: number | string;
   category_id: number | string;
   menu_category_id?: number | string;
@@ -49,17 +59,17 @@ export type MenuItem = {
   menu_mode?: MenuMode;
   created_at?: string;
   updated_at?: string;
-};
+}
 
-export type MenuCategoryParams = {
+export interface MenuCategoryParams {
   search?: string;
   active?: "all" | 0 | 1 | boolean;
   is_active?: "all" | 0 | 1 | boolean;
   page?: number;
   per_page?: number;
-};
+}
 
-export type MenuItemParams = {
+export interface MenuItemParams {
   search?: string;
   type?: MenuType | "all";
   category_id?: number | string | "all";
@@ -70,17 +80,17 @@ export type MenuItemParams = {
   menu_mode?: MenuMode | "all";
   page?: number;
   per_page?: number;
-};
+}
 
-export type MenuCategoryPayload = {
+export interface MenuCategoryPayload {
   name: string;
   description?: string | null;
   icon?: string | null;
   sort_order?: number | null;
   is_active?: boolean;
-};
+}
 
-export type MenuItemPayload = {
+export interface MenuItemPayload {
   category_id: number | string;
   name: string;
   description?: string | null;
@@ -90,4 +100,4 @@ export type MenuItemPayload = {
   is_active?: boolean;
   menu_mode?: MenuMode;
   image?: File | null;
-};
+}

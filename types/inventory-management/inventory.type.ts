@@ -1,5 +1,25 @@
-export type BaseUnit = "kg" | "L" | "pcs";
-export type InventoryTransactionType = "in" | "out" | "adjust" | "transfer_in" | "transfer_out" | "waste";
+// ================================
+// Inventory Base Types
+// ================================
+
+export type BaseUnit =
+  | "g"
+  | "kg"
+  | "ml"
+  | "L"
+  | "pcs";
+
+export type InventoryTransactionType =
+  | "in"
+  | "out"
+  | "adjust"
+  | "transfer_in"
+  | "transfer_out"
+  | "waste";
+
+// ================================
+// API
+// ================================
 
 export interface ApiEnvelope<T> {
   success?: boolean;
@@ -21,6 +41,10 @@ export interface PaginatedResponse<T> {
   meta: PaginationMeta;
 }
 
+// ================================
+// Inventory
+// ================================
+
 export interface InventoryListParams {
   search?: string;
   status?: "active" | "inactive" | "all";
@@ -34,7 +58,10 @@ export interface MenuItemOption {
   name: string;
   type?: "food" | "drink" | string | null;
   price?: number | string | null;
-  category?: { id: number; name: string } | null;
+  category?: {
+    id: number;
+    name: string;
+  } | null;
   category_name?: string | null;
   is_active?: boolean;
   is_available?: boolean;
@@ -45,58 +72,115 @@ export interface InventoryItem {
   name: string;
   sku?: string | null;
   description?: string | null;
+
   base_unit: BaseUnit;
   unit?: BaseUnit;
+
   current_stock: number;
+
   minimum_quantity: number;
   reorder_level?: number | null;
+
   average_purchase_price?: number | null;
+
   is_active?: boolean;
+
   created_at?: string | null;
   updated_at?: string | null;
 }
 
 export interface InventoryItemPayload {
   name: string;
+
   sku?: string;
   description?: string;
+
   base_unit: BaseUnit;
+
   current_stock?: number;
+
   minimum_quantity: number;
+
   average_purchase_price?: number;
+
   is_active?: boolean;
 }
 
+// ================================
+// Inventory Batch
+// ================================
+
 export interface InventoryBatch {
   id: number;
+
   inventory_item_id: number;
+
   batch_no?: string | null;
+
   purchase_price?: number | null;
+
   initial_qty: number;
+
   remaining_qty: number;
+
   expiry_date?: string | null;
+
   received_at?: string | null;
-  status?: "active" | "empty" | "depleted" | "available" | "expired" | string | null;
+
+  status?:
+    | "active"
+    | "available"
+    | "expired"
+    | "empty"
+    | "depleted"
+    | string
+    | null;
+
   inventory_item?: InventoryItem;
+
   inventoryItem?: InventoryItem;
 }
 
+// ================================
+// Transactions
+// ================================
+
 export interface InventoryTransaction {
   id: number;
+
   inventory_item_id: number;
+
   type?: InventoryTransactionType;
+
   transaction_type?: InventoryTransactionType;
+
   quantity: number;
+
   unit_cost?: number | null;
+
   note?: string | null;
+
   reason?: string | null;
+
   reference_type?: string | null;
+
   reference_id?: number | string | null;
+
   created_at?: string | null;
+
   inventory_item?: InventoryItem;
+
   inventoryItem?: InventoryItem;
-  created_by_user?: { id: number; name: string } | null;
+
+  created_by_user?: {
+    id: number;
+    name: string;
+  } | null;
 }
+
+// ================================
+// Payloads
+// ================================
 
 export interface StockAdjustmentPayload {
   quantity: number;
@@ -125,36 +209,61 @@ export interface ReceiveStockPayload {
     expiry_date?: string;
     batch_no?: string;
   }>;
+
   note?: string;
 }
 
+// ================================
+// Recipe
+// ================================
+
 export interface RecipeIngredient {
   id?: number;
+
   inventory_item_id: number;
+
   quantity: number;
+
   base_unit?: BaseUnit;
+
   unit?: BaseUnit;
+
   inventory_item?: InventoryItem;
+
   inventoryItem?: InventoryItem;
 }
 
 export interface Recipe {
   id: number;
+
   menu_item_id: number;
+
   name?: string | null;
+
   yield_quantity?: number | null;
+
   items?: RecipeIngredient[];
+
   recipe_items?: RecipeIngredient[];
-  menu_item?: { id: number; name: string } | null;
+
+  menu_item?: {
+    id: number;
+    name: string;
+  } | null;
 }
 
 export interface RecipePayload {
   menu_item_id: number;
+
   items: Array<{
     inventory_item_id: number;
     quantity: number;
   }>;
 }
+
+// ================================
+// Reports
+// ================================
 
 export interface LowStockRow extends InventoryItem {
   shortage?: number;
@@ -167,16 +276,53 @@ export interface StockValuationRow extends InventoryItem {
 
 export interface RecipeIntegrityRow {
   id?: number;
+
   menu_item_id?: number;
+
   menu_item_name?: string;
+
   menu_item_type?: string;
+
   inventory_tracking_mode?: string | null;
+
   direct_inventory_item_id?: number | null;
+
   recipe_id?: number | null;
+
   ingredient_count?: number | string;
+
   missing_inventory_links?: number | string;
+
   name?: string;
+
   status?: string;
+
   issue?: string;
+
   missing_items?: string[];
 }
+
+// ================================
+// Purchase Orders
+// ================================
+
+export type PurchaseOrderStatus =
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "received"
+  | "rejected"
+  | "cancelled";
+
+export interface PurchaseOrderListParams {
+  search?: string;
+  status?: PurchaseOrderStatus | "all";
+  page?: number;
+  per_page?: number;
+}
+
+export type InventoryScope =
+  | "admin"
+  | "food-controller"
+  | "stock-keeper"
+  | "purchaser";

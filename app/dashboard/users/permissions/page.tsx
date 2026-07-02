@@ -34,9 +34,9 @@ export default function PermissionsPage() {
 
   const params = useMemo(() => ({ search, page, per_page: 10 }), [search, page]);
   const permissionsQuery = usePermissionsQuery(params);
-  const createPermission = useCreatePermissionMutation(() => { setFormOpen(false); setName(""); });
-  const updatePermission = useUpdatePermissionMutation(() => { setFormOpen(false); setSelectedPermission(null); setName(""); });
-  const deleteMutation = useDeletePermissionMutation();
+const createPermission = useCreatePermissionMutation();
+const updatePermission = useUpdatePermissionMutation();
+const deleteMutation = useDeletePermissionMutation();
 
   const rows = permissionsQuery.data?.data ?? [];
   const meta = permissionsQuery.data?.meta;

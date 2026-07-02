@@ -18,7 +18,11 @@ import { can, inventoryPermissions } from "@/lib/auth/permissions";
 import { useAdjustStockMutation, useCreateInventoryItemMutation, useDeleteInventoryItemMutation, useInventoryItemsQuery, useUpdateInventoryItemMutation } from "@/hooks/inventory-management";
 import type { BaseUnit, InventoryItem } from "@/types/inventory-management";
 
-type Scope = "admin" | "food-controller" | "stock-keeper";
+type Scope =
+  | "admin"
+  | "food-controller"
+  | "stock-keeper"
+  | "purchaser";
 
 type SiUnitOption = { value: BaseUnit; label: string; hint: string };
 

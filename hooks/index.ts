@@ -1,8 +1,10 @@
-// src/hooks/index.ts
-
 // Users
 export * from "@/hooks/user-management/use-users";
-export { useRolesLiteQuery as useUserRolesLiteQuery } from "@/hooks/user-management/use-users";
+
+// Alias for backward compatibility
+export {
+  useRolesLiteQuery as useUserRolesLiteQuery,
+} from "@/hooks/user-management/use-users";
 
 // Roles
 export * from "@/hooks/user-management/use-roles";

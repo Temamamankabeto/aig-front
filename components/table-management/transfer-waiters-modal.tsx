@@ -66,7 +66,14 @@ export function TransferWaitersModal({
 
         <div className="space-y-3">
           <div className="rounded-xl border bg-muted/30 p-3 text-sm">
-            <p className="font-medium">{table?.display_name ?? table?.name ?? table?.table_number ?? "Selected table"}</p>
+           <p className="font-medium">
+  {String(
+    table?.display_name ??
+    table?.name ??
+    table?.table_number ??
+    "Selected table"
+  )}
+</p>
             <p className="text-muted-foreground">Choose the waiter(s) responsible for this table.</p>
           </div>
 

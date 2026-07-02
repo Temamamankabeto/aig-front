@@ -2,10 +2,66 @@ import api from "@/lib/api";
 import { authService } from "@/services/auth/auth.service";
 import type { InventoryListParams } from "@/types/inventory-management";
 
-export type ProcurementScope = "auto" | "admin" | "manager" | "food-controller" | "purchaser" | "stock-keeper";
+export interface PurchaserDashboardRecentRequest {
+  id: number;
+  po_number?: string | null;
+  supplier?: string | null;
+  status: string;
+  amount?: number;
+  created_at?: string | null;
+}
+export interface PurchaserDashboardData {
+  kpis: {
+    total_requests: number;
+    requests_this_week: number;
+    pending_validation: number;
+    validated: number;
+    manager_approved: number;
+    partially_received: number;
+    completed: number;
+    rejected: number;
+    monthly_cost: number;
+    low_stock_items: number;
+  };
 
+  status_distribution: Array<{
+    label: string;
+    status: string;
+    value: number;
+  }>;
 
+  workflow: Array<{
+    label: string;
+    value: number;
+  }>;
 
+  trend: Array<any>;
+
+  recent_requests: PurchaserDashboardRecentRequest[];
+
+  alerts: {
+    pending_validation: number;
+    pending_manager_approval: number;
+    approved_awaiting_receiving: number;
+    low_stock_items: number;
+    rejected_requests: number;
+  };
+}
+export type ProcurementScope =
+  | "auto"
+  | "admin"
+  | "manager"
+  | "food-controller"
+  | "purchaser"
+  | "stock-keeper";
+export interface PurchaseOrderListParams {
+  search?: string;
+  status?: PurchaseOrderStatus | "all";
+  supplier_id?: number | string;
+  page?: number;
+  per_page?: number;
+
+}
 export interface FoodControllerDashboardData {
   kpis: {
     pending_validation: number;
@@ -28,7 +84,13 @@ export interface FoodControllerDashboardData {
   };
   status_distribution: Array<{ label: string; status: string; value: number }>;
   workflow: Array<{ label: string; value: number }>;
-  trend: Array<{ day: string; date: string; submitted: number; validated: number; rejected: number }>;
+  trend: Array<{
+    day: string;
+    date: string;
+    submitted: number;
+    validated: number;
+    rejected: number;
+  }>;
   recent_validation_requests: Array<{
     id: number;
     po_number?: string | null;
@@ -87,6 +149,14 @@ export interface SupplierPayload {
   is_active?: boolean;
 }
 
+export interface PurchaseOrderListParams {
+  search?: string;
+  status?: PurchaseOrderStatus | "all";
+  supplier_id?: number | string;
+  page?: number;
+  per_page?: number;
+}
+
 export type PurchaseOrderStatus =
   | "draft"
   | "submitted"
@@ -107,8 +177,20 @@ export interface PurchaseOrderItemRow {
   received_quantity?: number | string | null;
   unit_cost: number | string;
   line_total?: number | string | null;
-  inventory_item?: { id: number; name: string; sku?: string | null; base_unit?: string | null; unit?: string | null } | null;
-  inventoryItem?: { id: number; name: string; sku?: string | null; base_unit?: string | null; unit?: string | null } | null;
+  inventory_item?: {
+    id: number;
+    name: string;
+    sku?: string | null;
+    base_unit?: string | null;
+    unit?: string | null;
+  } | null;
+  inventoryItem?: {
+    id: number;
+    name: string;
+    sku?: string | null;
+    base_unit?: string | null;
+    unit?: string | null;
+  } | null;
 }
 
 export interface PurchaseOrderRow {
@@ -133,21 +215,46 @@ export interface PurchaseOrderPayload {
   expected_date?: string;
   notes?: string;
   status?: "draft" | "submitted";
-  items: Array<{ inventory_item_id: number; quantity: number; base_unit: string; unit_cost: number }>;
+  items: Array<{
+    inventory_item_id: number;
+    quantity: number;
+    base_unit: string;
+    unit_cost: number;
+  }>;
 }
 
 export interface ReceiveOrderPayload {
   note?: string;
-  items: Array<{ purchase_order_item_id: number; quantity: number; unit?: string; expiry_date?: string; batch_no?: string; batch_note?: string }>;
+  items: Array<{
+    purchase_order_item_id: number;
+    quantity: number;
+    unit?: string;
+    expiry_date?: string;
+    batch_no?: string;
+    batch_note?: string;
+  }>;
 }
 
 export interface PaginatedLike<T> {
   data: T[];
-  meta: { current_page: number; per_page: number; total: number; last_page: number };
+  meta: {
+    current_page: number;
+    per_page: number;
+    total: number;
+    last_page: number;
+  };
 }
 
 function cleanParams(params: Record<string, unknown> = {}) {
-  return Object.fromEntries(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== "" && value !== "all"));
+  return Object.fromEntries(
+    Object.entries(params).filter(
+      ([, value]) =>
+        value !== undefined &&
+        value !== null &&
+        value !== "" &&
+        value !== "all",
+    ),
+  );
 }
 
 function normalizeRole(value?: string | null) {
@@ -161,16 +268,44 @@ function normalizeRole(value?: string | null) {
 function detectedScope(): Exclude<ProcurementScope, "auto"> {
   const roles = authService.getStoredRoles().map(normalizeRole);
 
-  if (roles.some((role) => ["general_admin", "admin", "administrator"].includes(role))) return "admin";
-  if (roles.some((role) => ["manager", "restaurant_manager", "cafeteria_manager"].includes(role))) return "manager";
-  if (roles.includes("purchaser") || roles.includes("purchase") || roles.includes("procurement_officer")) return "purchaser";
-  if (roles.includes("store_keeper") || roles.includes("stock_keeper") || roles.includes("warehouse")) return "stock-keeper";
-  if (roles.includes("fandb_controller") || roles.includes("food_controller") || roles.includes("food_and_beverage_controller") || roles.includes("f_and_b_controller")) return "food-controller";
+  if (
+    roles.some((role) =>
+      ["general_admin", "admin", "administrator"].includes(role),
+    )
+  )
+    return "admin";
+  if (
+    roles.some((role) =>
+      ["manager", "restaurant_manager", "cafeteria_manager"].includes(role),
+    )
+  )
+    return "manager";
+  if (
+    roles.includes("purchaser") ||
+    roles.includes("purchase") ||
+    roles.includes("procurement_officer")
+  )
+    return "purchaser";
+  if (
+    roles.includes("store_keeper") ||
+    roles.includes("stock_keeper") ||
+    roles.includes("warehouse")
+  )
+    return "stock-keeper";
+  if (
+    roles.includes("fandb_controller") ||
+    roles.includes("food_controller") ||
+    roles.includes("food_and_beverage_controller") ||
+    roles.includes("f_and_b_controller")
+  )
+    return "food-controller";
 
   return "admin";
 }
 
-function resolveScope(scope: ProcurementScope = "auto"): Exclude<ProcurementScope, "auto"> {
+function resolveScope(
+  scope: ProcurementScope = "auto",
+): Exclude<ProcurementScope, "auto"> {
   return scope === "auto" ? detectedScope() : scope;
 }
 
@@ -198,7 +333,15 @@ function paginated<T>(body: any): PaginatedLike<T> {
     };
   }
   const rows = Array.isArray(root) ? root : [];
-  return { data: rows as T[], meta: { current_page: 1, per_page: rows.length, total: rows.length, last_page: 1 } };
+  return {
+    data: rows as T[],
+    meta: {
+      current_page: 1,
+      per_page: rows.length,
+      total: rows.length,
+      last_page: 1,
+    },
+  };
 }
 
 function unwrap<T>(body: any): T {
@@ -207,74 +350,158 @@ function unwrap<T>(body: any): T {
 
 export const procurementService = {
   async foodControllerDashboard() {
-    const response = await api.get('/food-controller/dashboard');
+    const response = await api.get("/food-controller/dashboard");
     return unwrap<FoodControllerDashboardData>(response.data);
   },
 
-  async suppliers(params: InventoryListParams = {}, scope: ProcurementScope = "auto") {
-    const response = await api.get(`${rolePrefix(scope)}/suppliers`, { params: cleanParams(params as Record<string, unknown>) });
+  async purchaserDashboard() {
+    const response = await api.get("/purchaser/dashboard");
+    return unwrap<PurchaserDashboardData>(response.data);
+  },
+
+  
+
+  async suppliers(
+    params: InventoryListParams = {},
+    scope: ProcurementScope = "auto",
+  ) {
+    const response = await api.get(`${rolePrefix(scope)}/suppliers`, {
+      params: cleanParams(params as Record<string, unknown>),
+    });
     return paginated<SupplierRow>(response.data);
   },
 
-  async createSupplier(payload: SupplierPayload, scope: ProcurementScope = "auto") {
+  async createSupplier(
+    payload: SupplierPayload,
+    scope: ProcurementScope = "auto",
+  ) {
     const response = await api.post(`${rolePrefix(scope)}/suppliers`, payload);
     return unwrap<SupplierRow>(response.data);
   },
 
-  async purchaseOrders(params: InventoryListParams & { status?: string; supplier_id?: number | string } = {}, scope: ProcurementScope = "auto") {
-    const response = await api.get(`${rolePrefix(scope)}/purchase-orders`, { params: cleanParams(params as Record<string, unknown>) });
-    return paginated<PurchaseOrderRow>(response.data);
-  },
+  async purchaseOrders(
+  params: PurchaseOrderListParams = {},
+  scope: ProcurementScope = "auto",
+) {
+  const response = await api.get(
+    `${rolePrefix(scope)}/purchase-orders`,
+    {
+      params: cleanParams(params as Record<string, unknown>),
+    }
+  );
+
+  return paginated<PurchaseOrderRow>(response.data);
+},
+
 
   async purchaseOrder(id: number | string, scope: ProcurementScope = "auto") {
-    const response = await api.get(`${rolePrefix(scope)}/purchase-orders/${id}`);
+    const response = await api.get(
+      `${rolePrefix(scope)}/purchase-orders/${id}`,
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
   async pendingPurchaseValidation(params: InventoryListParams = {}) {
-    const response = await api.get(`/food-controller/purchase-orders/pending-validation`, {
-      params: cleanParams(params as Record<string, unknown>),
-    });
+    const response = await api.get(
+      `/food-controller/purchase-orders/pending-validation`,
+      {
+        params: cleanParams(params as Record<string, unknown>),
+      },
+    );
     return paginated<PurchaseOrderRow>(response.data);
   },
 
-  async createPurchaseOrder(payload: PurchaseOrderPayload, scope: ProcurementScope = "auto") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders`, payload);
+  async createPurchaseOrder(
+    payload: PurchaseOrderPayload,
+    scope: ProcurementScope = "auto",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders`,
+      payload,
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async submitPurchaseOrder(id: number | string, scope: ProcurementScope = "auto") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/submit`);
+  async submitPurchaseOrder(
+    id: number | string,
+    scope: ProcurementScope = "auto",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/submit`,
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async validatePurchaseOrder(id: number | string, note = "Food Controller confirmed validation", scope: ProcurementScope = "food-controller") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/validate`, { note });
+  async validatePurchaseOrder(
+    id: number | string,
+    note = "Food Controller confirmed validation",
+    scope: ProcurementScope = "food-controller",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/validate`,
+      { note },
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async rejectPurchaseValidation(id: number | string, reason: string, scope: ProcurementScope = "food-controller") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/reject-validation`, { reason });
+  async rejectPurchaseValidation(
+    id: number | string,
+    reason: string,
+    scope: ProcurementScope = "food-controller",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/reject-validation`,
+      { reason },
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async approvePurchaseOrder(id: number | string, scope: ProcurementScope = "manager") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/approve`);
+  async approvePurchaseOrder(
+    id: number | string,
+    scope: ProcurementScope = "manager",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/approve`,
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async cancelPurchaseOrder(id: number | string, reason: string, scope: ProcurementScope = "manager") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/cancel`, { reason });
+  async cancelPurchaseOrder(
+    id: number | string,
+    reason: string,
+    scope: ProcurementScope = "manager",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/cancel`,
+      { reason },
+    );
     return unwrap<PurchaseOrderRow>(response.data);
   },
 
-  async stockReceivings(params: InventoryListParams & { purchase_order_id?: number | string; supplier_id?: number | string } = {}, scope: ProcurementScope = "auto") {
-    const response = await api.get(`${rolePrefix(scope)}/stock-receivings`, { params: cleanParams(params as Record<string, unknown>) });
+  async stockReceivings(
+    params: InventoryListParams & {
+      purchase_order_id?: number | string;
+      supplier_id?: number | string;
+    } = {},
+    scope: ProcurementScope = "auto",
+  ) {
+    const response = await api.get(`${rolePrefix(scope)}/stock-receivings`, {
+      params: cleanParams(params as Record<string, unknown>),
+    });
     return paginated<any>(response.data);
   },
 
-  async receivePurchaseOrder(id: number | string, payload: ReceiveOrderPayload, scope: ProcurementScope = "auto") {
-    const response = await api.post(`${rolePrefix(scope)}/purchase-orders/${id}/receive`, payload);
+  async receivePurchaseOrder(
+    id: number | string,
+    payload: ReceiveOrderPayload,
+    scope: ProcurementScope = "auto",
+  ) {
+    const response = await api.post(
+      `${rolePrefix(scope)}/purchase-orders/${id}/receive`,
+      payload,
+    );
     return unwrap<{ receiving: unknown; po: PurchaseOrderRow }>(response.data);
   },
+  
+  
 };

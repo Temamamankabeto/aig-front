@@ -1714,12 +1714,8 @@ export function OrderDetailPage({
     per_page: 100,
     status: "active",
   });
-  const recordPayment = useRecordBillPaymentMutation(() =>
-    setPaymentOpen(false),
-  );
-  const convertCredit = useConvertBillToCreditMutation(() =>
-    setCreditOpen(false),
-  );
+const recordPayment = useRecordBillPaymentMutation();
+const convertCredit = useConvertBillToCreditMutation();
 
   const order = normalizeOrderResponse(query.data);
   const items = normalizeOrderItems(order);
@@ -2117,8 +2113,8 @@ export function CreditAccountsPage() {
   });
 
   const query = useCreditAccountsQuery(filters);
-  const createAccount = useCreateCreditAccountMutation(closeForm);
-  const updateAccount = useUpdateCreditAccountMutation(closeForm);
+const createAccount = useCreateCreditAccountMutation();
+const updateAccount = useUpdateCreditAccountMutation();
   const toggleAccount = useToggleCreditAccountMutation();
   const accounts = query.data?.data ?? [];
   const meta = query.data?.meta;
@@ -2586,7 +2582,7 @@ export function CreditOrdersPage() {
   });
   const query = useCreditOrdersQuery(filters);
   const approve = useApproveCreditOrderMutation();
-  const settlement = useSettleCreditOrderMutation(() => setSettle(null));
+const settlement = useSettleCreditOrderMutation();
   const rows = query.data?.data ?? [];
 
   function updateFilter(patch: Partial<typeof filters>) {

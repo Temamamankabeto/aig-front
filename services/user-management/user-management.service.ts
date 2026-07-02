@@ -1,4 +1,5 @@
 import api, { unwrap } from "@/lib/api";
+
 import type {
   ApiEnvelope,
   AssignRolePermissionsPayload,
@@ -18,48 +19,67 @@ import type {
   UserListParams,
 } from "@/types/user-management/user.type";
 
+/**
+ * Clean query params
+ */
 function cleanParams<T extends Record<string, unknown>>(params: T = {} as T) {
   const output: Record<string, unknown> = {};
+
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "" || value === "all") return;
     output[key] = value;
   });
+
   return output;
 }
 
+/**
+ * Safe row extraction
+ */
 function extractRows<T>(body: unknown): T[] {
   const root = body as Record<string, unknown> | null;
-  const data = root && typeof root === "object" ? root.data : undefined;
 
-  if (Array.isArray(body)) return body as T[];
+  const data =
+    Array.isArray(body)
+      ? body
+      : root?.data;
+
   if (Array.isArray(data)) return data as T[];
-  if (data && typeof data === "object" && Array.isArray((data as { data?: unknown }).data)) {
-    return (data as { data: T[] }).data;
+
+  if (data && typeof data === "object" && Array.isArray((data as any)?.data)) {
+    return (data as any).data as T[];
   }
 
   return [];
 }
 
+/**
+ * Pagination helper (FIXED)
+ */
 function paginated<T>(body: unknown): PaginatedResponse<T> {
-  const root = body as { success?: boolean; message?: string; meta?: Record<string, unknown> } | null;
+  const root = body as Record<string, unknown> | null;
+
   const rows = extractRows<T>(body);
-  const data = root && typeof root === "object" ? root.data : undefined;
-  const paginator = data && typeof data === "object" && !Array.isArray(data)
-    ? data as Record<string, unknown>
-    : root && typeof root === "object"
-      ? root as Record<string, unknown>
-      : {};
-  const meta = root?.meta ?? paginator;
+
+  const data = root?.data;
+
+  const paginator =
+    data && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : root ?? {};
+
+  const meta =
+    (paginator as any)?.meta ?? (root as any)?.meta ?? {};
 
   return {
-    success: root?.success,
-    message: root?.message,
+    success: (root as any)?.success,
+    message: (root as any)?.message,
     data: rows,
     meta: {
-      current_page: Number(meta.current_page ?? 1),
-      per_page: Number(meta.per_page ?? rows.length ?? 10),
-      total: Number(meta.total ?? rows.length ?? 0),
-      last_page: Number(meta.last_page ?? 1),
+      current_page: Number((meta as any)?.current_page ?? 1),
+      per_page: Number((meta as any)?.per_page ?? rows.length ?? 10),
+      total: Number((meta as any)?.total ?? rows.length ?? 0),
+      last_page: Number((meta as any)?.last_page ?? 1),
     },
   };
 }
@@ -67,7 +87,10 @@ function paginated<T>(body: unknown): PaginatedResponse<T> {
 export const userManagementService = {
   users: {
     async list(params: UserListParams = {}) {
-      const response = await api.get("/admin/users", { params: cleanParams(params) });
+      const response = await api.get("/admin/users", {
+        params: cleanParams(params),
+      });
+
       return paginated<UserItem>(response.data);
     },
 
@@ -112,14 +135,19 @@ export const userManagementService = {
     },
 
     async waitersLite(search?: string) {
-      const response = await api.get("/admin/users/waiters-lite", { params: cleanParams({ search }) });
+      const response = await api.get("/admin/users/waiters-lite", {
+        params: cleanParams({ search }),
+      });
       return extractRows<UserItem>(response.data);
     },
   },
 
   roles: {
     async list(params: RoleListParams = {}) {
-      const response = await api.get("/admin/roles", { params: cleanParams(params) });
+      const response = await api.get("/admin/roles", {
+        params: cleanParams(params),
+      });
+
       return paginated<RoleItem>(response.data);
     },
 
@@ -134,7 +162,10 @@ export const userManagementService = {
     },
 
     async permissions(search?: string) {
-      const response = await api.get("/admin/role-permissions", { params: cleanParams({ search }) });
+      const response = await api.get("/admin/role-permissions", {
+        params: cleanParams({ search }),
+      });
+
       return extractRows<PermissionItem>(response.data);
     },
 
@@ -151,12 +182,18 @@ export const userManagementService = {
 
   permissions: {
     async list(params: PermissionListParams = {}) {
-      const response = await api.get("/admin/permissions", { params: cleanParams(params) });
+      const response = await api.get("/admin/permissions", {
+        params: cleanParams(params),
+      });
+
       return paginated<PermissionItem>(response.data);
     },
 
     async all(search?: string) {
-      const response = await api.get("/admin/permissions", { params: cleanParams({ all: true, search }) });
+      const response = await api.get("/admin/permissions", {
+        params: cleanParams({ all: true, search }),
+      });
+
       return extractRows<PermissionItem>(response.data);
     },
 

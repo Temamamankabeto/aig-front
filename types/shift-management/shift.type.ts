@@ -19,7 +19,12 @@ export type PaginatedResponse<T> = {
 };
 
 export type ShiftStatus = "open" | "closed";
-export type ShiftMovementType = "opening_adjustment" | "refund" | "paid_out" | "cash_drop";
+
+export type ShiftMovementType =
+  | "opening_adjustment"
+  | "refund"
+  | "paid_out"
+  | "cash_drop";
 
 export type ShiftFilters = {
   search?: string;
@@ -50,28 +55,43 @@ export type CashShift = {
   id: number | string;
   cashier_id?: number | string;
   cashier_name?: string;
-  cashier?: { id: number | string; name: string; email?: string } | null;
+  cashier?: {
+    id: number | string;
+    name: string;
+    email?: string;
+  } | null;
+
   status: ShiftStatus;
+
   opening_cash: number | string;
   closing_cash?: number | string | null;
   expected_cash?: number | string | null;
   variance?: number | string | null;
+
   opened_at?: string;
   closed_at?: string | null;
   notes?: string | null;
+
   summary?: ShiftSummary;
 };
 
 export type CashShiftMovement = {
   id: number | string;
   cash_shift_id: number | string;
+
   created_by?: number | string | null;
-  creator?: { id: number | string; name: string } | null;
+  creator?: {
+    id: number | string;
+    name: string;
+  } | null;
+
   type: ShiftMovementType;
   amount: number | string;
+
   note?: string | null;
   reference_type?: string | null;
   reference_id?: number | string | null;
+
   created_at?: string;
 };
 
@@ -91,6 +111,9 @@ export type CreateShiftMovementPayload = {
   note?: string;
 };
 
+/**
+ * Flexible report type (API is not consistent)
+ */
 export type ShiftReport = CashShift & {
   shift?: CashShift;
   cash_sales?: number | string;

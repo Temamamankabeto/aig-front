@@ -41,6 +41,7 @@ import type {
   MenuItemPayload,
   MenuItemParams,
   MenuType,
+  MenuRoleScope,
 } from "@/types/menu-management";
 
 type Props = {
@@ -332,7 +333,10 @@ function ItemDetailDialog({
   );
 }
 
-export function MenuManagementPage({ readOnly = false, scope = "admin" }: Props) {
+export function MenuManagementPage({
+  readOnly = false,
+  scope = "admin" as MenuRoleScope,
+}: Props) {
   const readonly = readOnly || scope === "waiter" || scope === "public";
   const [itemParams, setItemParams] = useState<MenuItemParams>({
     page: 1,
