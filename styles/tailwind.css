@@ -412,3 +412,28 @@
       linear-gradient(to bottom, oklch(1 0 0 / 0.05) 1px, transparent 1px);
   }
 }
+@layer components {
+  .credit-actions-trigger {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+
+  .credit-actions-menu {
+    @apply fixed z-[100] w-48 rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl;
+  }
+
+  .credit-actions-menu-title {
+    @apply px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground;
+  }
+
+  .credit-actions-menu-separator {
+    @apply my-1 h-px bg-border;
+  }
+
+  .credit-actions-menu-item {
+    @apply flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none;
+  }
+
+  .credit-actions-menu-item svg {
+    @apply h-4 w-4 shrink-0 text-muted-foreground;
+  }
+}

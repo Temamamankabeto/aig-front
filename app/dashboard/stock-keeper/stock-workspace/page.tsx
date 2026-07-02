@@ -2,19 +2,21 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardList, Package, PackageCheck, SlidersHorizontal, Trash2, Warehouse } from "lucide-react";
+import { ClipboardList, Package, PackageCheck, PlusCircle, SlidersHorizontal, Trash2, Warehouse } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { procurementService } from "@/services/inventory-management/procurement.service";
 import inventoryService from "@/services/inventory-management/inventory.service";
 
 const actionCards = [
-  { title: "Receive Ordered Items", description: "Receive approved purchase orders and create stock batches.", href: "/dashboard/purchases/receiving", icon: PackageCheck },
-  { title: "Inventory Items", description: "View stock items and current quantities.", href: "/dashboard/inventory/items", icon: Package },
+  { title: "Request Purchase", description: "Create purchase requests for stock items that need replenishment.", href: "/dashboard/purchases/requests", icon: PlusCircle },
+  { title: "Receive Approved Purchase", description: "Receive manager-approved purchase orders and create stock batches.", href: "/dashboard/purchases/receiving", icon: PackageCheck },
+  { title: "Record Department Stockout", description: "Issue stock out to Kitchen, Bar, Housekeeping, or another department.", href: "/dashboard/inventory/stockout", icon: ClipboardList },
+  { title: "Adjust Stock", description: "Record physical count corrections and manual stock adjustments.", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
+  { title: "Waste / Damage", description: "Record expired, damaged, spoiled, or wasted stock.", href: "/dashboard/inventory/waste", icon: Trash2 },
   { title: "Stock Movements", description: "Review all stock transactions and movement history.", href: "/dashboard/inventory/movements", icon: ClipboardList },
-  { title: "Batches", description: "Track batch quantities, expiry dates, and availability.", href: "/dashboard/inventory/batches", icon: Warehouse },
-  { title: "Adjustments", description: "Record physical count corrections and manual stock adjustments.", href: "/dashboard/inventory/adjustments", icon: SlidersHorizontal },
-  { title: "Waste / Damage", description: "Record expired, damaged, or wasted stock.", href: "/dashboard/inventory/waste", icon: Trash2 },
+  { title: "Inventory Batches", description: "Track batch quantities, expiry dates, and availability.", href: "/dashboard/inventory/batches", icon: Warehouse },
+  { title: "Inventory Items", description: "View stock items and current quantities.", href: "/dashboard/inventory/items", icon: Package },
 ];
 
 export default function StockKeeperWorkspacePage() {
@@ -52,7 +54,7 @@ export default function StockKeeperWorkspacePage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Stock Keeper Workspace</h1>
-        <p className="text-muted-foreground">Central workspace for receiving, stock balances, batches, movements, adjustments, and waste control.</p>
+        <p className="text-muted-foreground">Central workspace for purchase requests, approved receiving, department stockout, adjustments, waste/damage, movements, and batches.</p>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

@@ -16,13 +16,8 @@ import { usePermissions, inventoryPermissions, purchasePermissions } from "@/lib
 import { procurementService } from "@/services/inventory-management/procurement.service";
 import { authService } from "@/services/auth/auth.service";
 import { normalizeRole } from "@/config/dashboard.config";
-import type { PurchaseOrderStatus } from "@/services/inventory-management/procurement.service";
-import type { InventoryScope } from "@/types/inventory-management/inventory.type";
-type Scope =
-  | "admin"
-  | "food-controller"
-  | "stock-keeper"
-  | "purchaser";
+
+type Scope = "admin" | "food-controller" | "stock-keeper";
 
 type WorkspaceTab = {
   value: string;
@@ -58,69 +53,47 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
     (isPurchaser && canAny([purchasePermissions.ordersRead, purchasePermissions.ordersCreate, purchasePermissions.requestsCreate, purchasePermissions.ordersSubmit])) ||
     (isStockKeeper && canAny([purchasePermissions.ordersReceive, inventoryPermissions.receive]));
 
-type PurchaseTab = {
-  value: string;
-  label: string;
-  status: PurchaseOrderStatus | "all";
-  scope: Scope;
-  content: ReactNode;
-};
-
- const purchaseTab: PurchaseTab | null = isManager
-  ? {
-      value: "purchase-approval",
-      label: "Purchase Approval",
-      status: "food_validated",
-      scope: "admin",
-      content: <PurchaseApprovalTabPage />,
-    }
-  : isFbController
+  const purchaseTab = isManager
     ? {
-        value: "purchase-validation",
-        label: "Purchase Validation",
-        status: "submitted",
-        scope: "food-controller",
-        content: <PurchaseValidationConfirmPage />,
+        value: "purchase-approval",
+        label: "Purchase Approval",
+        status: "food_validated",
+        scope: "admin" as const,
+        content: <PurchaseApprovalTabPage />,
       }
-    : isPurchaser
+    : isFbController
       ? {
-          value: "purchase-requests",
-          label: "Purchase Requests",
+          value: "purchase-validation",
+          label: "Purchase Validation",
           status: "submitted",
-          scope: "purchaser",
-          content: <PurchaseRequestsPage />,
+          scope: "food-controller" as const,
+          content: <PurchaseValidationConfirmPage />,
         }
-      : isStockKeeper
+      : isPurchaser
         ? {
-            value: "receive-ordered-items",
-            label: "Receive Ordered Items",
-            status: "approved",
-            scope: "stock-keeper",
-            content: <OrderedItemsReceivingPage />,
+            value: "purchase-requests",
+            label: "Purchase Requests",
+            status: "submitted",
+            scope: "purchaser" as const,
+            content: <PurchaseRequestsPage />,
           }
-        : null;
-const purchaseCount = useQuery({
-  queryKey: [
-    "inventory-tabs",
-    purchaseTab?.value ?? "purchase",
-    purchaseTab?.status ?? "none",
-  ],
+        : isStockKeeper
+          ? {
+              value: "receive-ordered-items",
+              label: "Receive Ordered Items",
+              status: "approved",
+              scope: "stock-keeper" as const,
+              content: <OrderedItemsReceivingPage />,
+            }
+          : null;
 
-  queryFn: () =>
-    procurementService.purchaseOrders(
-      {
-        status: purchaseTab!.status,
-        per_page: 1,
-      },
-      purchaseTab!.scope
-    ),
-
-  enabled: Boolean(canSeePurchaseTab && purchaseTab),
-
-  staleTime: 30000,
-
-  retry: false,
-});
+  const purchaseCount = useQuery({
+    queryKey: ["inventory-tabs", purchaseTab?.value ?? "purchase", purchaseTab?.status ?? "none"],
+    queryFn: () => procurementService.purchaseOrders({ status: purchaseTab?.status, per_page: 1 }, purchaseTab?.scope),
+    enabled: Boolean(canSeePurchaseTab && purchaseTab),
+    staleTime: 30000,
+    retry: false,
+  });
 
   const pendingPurchaseCount = purchaseCount.data?.meta.total ?? 0;
 

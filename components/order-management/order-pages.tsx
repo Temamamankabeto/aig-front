@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Plus, Search, ShoppingCart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,10 +42,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import ShiftManagementPage from "@/components/shift-management/ShiftManagementPage";
+import { printCustomerOrderTicket, printOrderBill as printOrderBillDocument } from "@/components/order-management/order-print-utils";
 import { useMenuItemsQuery } from "@/hooks/queries/menu-management";
-import { orderService } from "@/services/order-management";
 import { useTablesQuery } from "@/hooks/queries/table-management";
 import {
   useCreditAccountsQuery,
@@ -67,20 +64,19 @@ import {
   useServeOrderMutation,
   useSettleCreditOrderMutation,
   usePrepTicketActionMutation,
+  useAddOrderItemMutation,
+  useUpdateOrderItemMutation,
+  useRemoveOrderItemMutation,
+  usePrintOrderBillMutation,
   useRecordBillPaymentMutation,
   useConvertBillToCreditMutation,
 } from "@/hooks/mutations/order-management";
 import type {
+  CreditAccount,
   CreditOrder,
   Order,
   OrderItemPayload,
 } from "@/types/order-management";
-import {
-  printBarTicket,
-  printCustomerOrderTicket,
-  printKitchenTicket,
-  printOrderBill,
-} from "@/components/order-management/order-print-utils";
 
 type Scope = "admin" | "waiter" | "cashier";
 type Period = "today" | "this_week" | "this_month" | "this_year" | "custom";
@@ -92,8 +88,36 @@ function money(v: unknown) {
   });
 }
 
+function activeAgreements(account?: CreditAccount | null): any[] {
+  const value = account as any;
+  if (Array.isArray(value?.active_agreements)) return value.active_agreements;
+  if (Array.isArray(value?.activeAgreements)) return value.activeAgreements;
+  if (Array.isArray(value?.agreements)) {
+    const today = new Date().toISOString().slice(0, 10);
+    return value.agreements.filter((agreement: any) => String(agreement.status ?? "active") === "active" && String(agreement.start_date ?? "").slice(0, 10) <= today && String(agreement.end_date ?? "").slice(0, 10) >= today);
+  }
+  return [];
+}
+
 function date(v?: string) {
   return v ? new Date(v).toLocaleString() : "—";
+}
+
+function isInsideCustomDateRange(
+  value: unknown,
+  filters: { period?: Period; date_from?: string; date_to?: string },
+) {
+  if (filters.period !== "custom") return true;
+  if (!filters.date_from && !filters.date_to) return true;
+  if (!value) return false;
+
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  const day = parsed.toISOString().slice(0, 10);
+  if (filters.date_from && day < filters.date_from) return false;
+  if (filters.date_to && day > filters.date_to) return false;
+  return true;
 }
 
 function imageUrlFromMenu(item: any) {
@@ -200,7 +224,6 @@ export function OrdersPage({
   title?: string;
   createHref?: string;
 }) {
-  const [activeTab, setActiveTab] = useState("orders");
   const [filters, setFilters] = useState({
     page: 1,
     per_page: 10,
@@ -208,7 +231,7 @@ export function OrdersPage({
     status: "all",
     order_type: "all",
     payment_status: "all",
-    waiter_id: "all",
+    payment_type: "all",
     period: "today" as Period,
     date_from: "",
     date_to: "",
@@ -220,167 +243,33 @@ export function OrdersPage({
   );
   const rows = query.data?.data ?? [];
   const meta = query.data?.meta;
-
-  const waitersQuery = useWaitersLiteQuery();
-  const waiters = waitersQuery.data ?? [];
-
-  const paymentsQuery = useQuery({
-    queryKey: ["cashier-payment-sold-items", filters],
-    queryFn: () => orderService.cashierSoldItems({ ...filters, per_page: 100 }),
-    enabled: scope === "cashier",
-  });
-
-  const paymentRows = useMemo(() => {
-    const rows = paymentsQuery.data?.data ?? [];
-
-    return rows.map((row: any) => ({
-      key: row.id ?? `${row.payment_id}-${row.item_id}`,
-      receiptNo: row.bill_number ?? row.receipt_no ?? row.reference ?? `PAY-${row.payment_id ?? "—"}`,
-      orderId: row.order_id,
-      orderNumber: row.order_number ?? `#${row.order_id ?? "—"}`,
-      waiter: row.waiter_name ?? "—",
-      itemName: row.item_name ?? "Menu Item",
-      qty: Number(row.quantity ?? 0),
-      unit: Number(row.unit_price ?? 0),
-      vat: Number(row.vat ?? 0),
-      serviceCharge: Number(row.service_charge ?? 0),
-      total: Number(row.total ?? row.line_total ?? 0),
-      method: row.payment_method ?? row.method ?? "—",
-      paidAt: row.paid_at ?? row.created_at,
-    }));
-  }, [paymentsQuery.data]);
+  const report = (meta as any)?.report;
+  const filteredRows = useMemo(
+    () => rows.filter((order: Order) => isInsideCustomDateRange((order as any).created_at ?? (order as any).createdAt, filters)),
+    [rows, filters.period, filters.date_from, filters.date_to],
+  );
 
   const confirm = useConfirmOrderMutation();
   const serve = useServeOrderMutation();
   const cancel = useRequestCancelOrderMutation();
 
+  const totals = useMemo(
+    () => ({
+      total: report?.total_orders ?? filteredRows.length,
+      totalCost:
+        report?.total_cost ??
+        filteredRows.reduce(
+          (sum, order) => sum + Number(order.total ?? order.total_amount ?? 0),
+          0,
+        ),
+      confirmed: filteredRows.filter((o) => o.status === "confirmed").length,
+      ready: filteredRows.filter((o) => o.status === "ready").length,
+    }),
+    [filteredRows, report],
+  );
+
   const updateFilter = (patch: Partial<typeof filters>) =>
     setFilters((current) => ({ ...current, ...patch, page: 1 }));
-
-  const resetFilters = () =>
-    setFilters({
-      page: 1,
-      per_page: 10,
-      search: "",
-      status: "all",
-      order_type: "all",
-      payment_status: "all",
-      waiter_id: "all",
-      period: "today",
-      date_from: "",
-      date_to: "",
-    });
-
-  const renderFilters = () => (
-    <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-7">
-      <Select
-        value={filters.period}
-        onValueChange={(period: Period) => updateFilter({ period })}
-      >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="today">Today</SelectItem>
-          <SelectItem value="this_week">This week</SelectItem>
-          <SelectItem value="this_month">This month</SelectItem>
-          <SelectItem value="this_year">This year</SelectItem>
-          <SelectItem value="custom">Custom interval</SelectItem>
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.waiter_id}
-        onValueChange={(waiter_id) => updateFilter({ waiter_id })}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Waiter" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All waiters</SelectItem>
-          {waiters.map((waiter) => (
-            <SelectItem key={waiter.id} value={String(waiter.id)}>
-              {waiter.name ?? waiter.email ?? `Waiter ${waiter.id}`}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.status}
-        onValueChange={(status) => updateFilter({ status })}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Order status" />
-        </SelectTrigger>
-        <SelectContent>
-          {[
-            "all",
-            "confirmed",
-            "in_progress",
-            "ready",
-            "served",
-            "completed",
-            "cancel_requested",
-            "cancelled",
-          ].map((s) => (
-            <SelectItem key={s} value={s}>
-              {s.replace(/_/g, " ")}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.order_type}
-        onValueChange={(order_type) => updateFilter({ order_type })}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Order type" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All types</SelectItem>
-          <SelectItem value="dine_in">Dine in</SelectItem>
-          <SelectItem value="takeaway">Takeaway</SelectItem>
-        </SelectContent>
-      </Select>
-
-      <Select
-        value={filters.payment_status}
-        onValueChange={(payment_status) => updateFilter({ payment_status })}
-      >
-        <SelectTrigger>
-          <SelectValue placeholder="Payment status" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All payments</SelectItem>
-          <SelectItem value="issued">Unpaid / issued</SelectItem>
-          <SelectItem value="partial">Partial</SelectItem>
-          <SelectItem value="paid">Paid</SelectItem>
-          <SelectItem value="void">Void</SelectItem>
-        </SelectContent>
-      </Select>
-
-      {filters.period === "custom" && (
-        <>
-          <Input
-            type="date"
-            value={filters.date_from}
-            onChange={(e) => updateFilter({ date_from: e.target.value })}
-          />
-          <Input
-            type="date"
-            value={filters.date_to}
-            onChange={(e) => updateFilter({ date_to: e.target.value })}
-          />
-        </>
-      )}
-
-      <Button variant="outline" onClick={resetFilters}>
-        Reset
-      </Button>
-    </div>
-  );
 
   return (
     <div className="space-y-6">
@@ -388,11 +277,13 @@ export function OrdersPage({
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
           <p className="text-muted-foreground">
-            Cashier workspace for own orders, waiter orders, unpaid bills, and
-            sold items.
+            Create, track, confirm, serve, and cancel restaurant orders.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/order-management/orders/sold-items">See ordered items</Link>
+          </Button>
           <Button asChild>
             <Link href={createHref}>
               <Plus className="mr-2 h-4 w-4" />
@@ -402,451 +293,44 @@ export function OrdersPage({
         </div>
       </div>
 
-      <Tabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="space-y-4"
-      >
-        <TabsList>
-          <TabsTrigger value="orders">Orders</TabsTrigger>
-          {scope === "cashier" && (
-            <TabsTrigger value="payments">Payment sold items</TabsTrigger>
-          )}
-          {scope === "cashier" && (
-            <TabsTrigger value="shift">Shift Open / Close</TabsTrigger>
-          )}
-        </TabsList>
-
-        <TabsContent value="orders" className="space-y-4">
+      {scope !== "cashier" && (
+        <div className="grid gap-4 md:grid-cols-4">
           <Card className="rounded-2xl">
-            <CardHeader className="space-y-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle>Order list</CardTitle>
-                  <CardDescription>
-                    Shows waiter-created orders and orders created by the
-                    logged-in cashier.
-                  </CardDescription>
-                </div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="pl-9 md:w-72"
-                    placeholder="Search order/customer"
-                    value={filters.search}
-                    onChange={(e) => updateFilter({ search: e.target.value })}
-                  />
-                </div>
-              </div>
-              {renderFilters()}
+            <CardHeader className="pb-2">
+              <CardDescription>Total orders</CardDescription>
+              <CardTitle>{totals.total}</CardTitle>
             </CardHeader>
-
-            <CardContent>
-              <div className="overflow-x-auto rounded-xl border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Order number</TableHead>
-                      <TableHead>Order type</TableHead>
-                      <TableHead>Waiter</TableHead>
-                      <TableHead>Customer/Table</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Payment status</TableHead>
-                      <TableHead>Cost per order</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {query.isLoading ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={9}
-                          className="h-24 text-center text-muted-foreground"
-                        >
-                          Loading orders...
-                        </TableCell>
-                      </TableRow>
-                    ) : rows.length ? (
-                      rows.map((order: Order) => (
-                        <TableRow key={order.id}>
-                          <TableCell>
-                            <div className="font-medium">
-                              {order.order_number ?? `#${order.id}`}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {lineItemsCount(order)} items
-                            </div>
-                          </TableCell>
-                          <TableCell className="capitalize">
-                            {String((order as any).order_type ?? "—").replace(
-                              /_/g,
-                              " ",
-                            )}
-                          </TableCell>
-                          <TableCell>{order.waiter?.name ?? "—"}</TableCell>
-                          <TableCell>
-                            <div>
-                              {order.customer?.name ??
-                                order.customer_name ??
-                                "Walk-in"}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              {order.table?.table_number ??
-                                order.table?.name ??
-                                "No table"}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge status={order.status} />
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge
-                              status={order.bill?.status ?? "issued"}
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            {money(order.total ?? order.total_amount)}
-                          </TableCell>
-                          <TableCell>{date(order.created_at)}</TableCell>
-                          <TableCell className="text-right">
-                            <DropdownMenu modal={false}>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem asChild>
-                                  <Link
-                                    href={`/dashboard/order-management/pos/orders/${order.id}`}
-                                  >
-                                    View details
-                                  </Link>
-                                </DropdownMenuItem>
-                                {canConfirmOrder(order.status) && (
-                                  <DropdownMenuItem
-                                    disabled={confirm.isPending}
-                                    onClick={() => confirm.mutate(order.id)}
-                                  >
-                                    Confirm
-                                  </DropdownMenuItem>
-                                )}
-                                {canServeOrder(order.status) && (
-                                  <DropdownMenuItem
-                                    disabled={serve.isPending}
-                                    onClick={() => serve.mutate(order.id)}
-                                  >
-                                    Mark served
-                                  </DropdownMenuItem>
-                                )}
-                                {canRequestCancelOrder(order.status) && (
-                                  <DropdownMenuItem
-                                    className="text-destructive"
-                                    disabled={cancel.isPending}
-                                    onClick={() =>
-                                      cancel.mutate({
-                                        id: order.id,
-                                        reason: "Requested from frontend",
-                                      })
-                                    }
-                                  >
-                                    Request cancel
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell
-                          colSpan={9}
-                          className="h-24 text-center text-muted-foreground"
-                        >
-                          No orders found.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Page {meta?.current_page ?? 1} of {meta?.last_page ?? 1}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    disabled={(meta?.current_page ?? 1) <= 1}
-                    onClick={() =>
-                      setFilters({
-                        ...filters,
-                        page: Math.max(1, filters.page - 1),
-                      })
-                    }
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    disabled={
-                      (meta?.current_page ?? 1) >= (meta?.last_page ?? 1)
-                    }
-                    onClick={() =>
-                      setFilters({ ...filters, page: filters.page + 1 })
-                    }
-                  >
-                    Next
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
           </Card>
-        </TabsContent>
-
-        {scope === "cashier" && (
-          <TabsContent value="payments" className="space-y-4">
-            <Card className="rounded-2xl">
-              <CardHeader className="space-y-4">
-                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <CardTitle>Sold items by logged-in cashier</CardTitle>
-                    <CardDescription>
-                      Only paid items recorded by the current cashier are shown
-                      here.
-                    </CardDescription>
-                  </div>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      className="pl-9 md:w-72"
-                      placeholder="Search order/item/customer"
-                      value={filters.search}
-                      onChange={(e) => updateFilter({ search: e.target.value })}
-                    />
-                  </div>
-                </div>
-                {renderFilters()}
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto rounded-xl border">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Receipt / Order</TableHead>
-                        <TableHead>Waiter</TableHead>
-                        <TableHead>Item</TableHead>
-                        <TableHead>Qty</TableHead>
-                        <TableHead>Unit price</TableHead>
-                        <TableHead>VAT</TableHead>
-                        <TableHead>Service</TableHead>
-                        <TableHead>Total</TableHead>
-                        <TableHead>Method</TableHead>
-                        <TableHead>Paid date</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {paymentsQuery.isLoading ? (
-                        <TableRow>
-                          <TableCell
-                            colSpan={10}
-                            className="h-24 text-center text-muted-foreground"
-                          >
-                            Loading sold items...
-                          </TableCell>
-                        </TableRow>
-                      ) : paymentRows.length ? (
-                        paymentRows.map((row: any) => (
-                          <TableRow key={row.key}>
-                            <TableCell>
-                              <div className="font-medium">{row.receiptNo}</div>
-                              <Link
-                                className="text-xs text-muted-foreground hover:underline"
-                                href={`/dashboard/order-management/pos/orders/${row.orderId}`}
-                              >
-                                {row.orderNumber}
-                              </Link>
-                            </TableCell>
-                            <TableCell>{row.waiter}</TableCell>
-                            <TableCell className="font-medium">
-                              {row.itemName}
-                            </TableCell>
-                            <TableCell>{row.qty}</TableCell>
-                            <TableCell>{money(row.unit)}</TableCell>
-                            <TableCell>{money(row.vat)}</TableCell>
-                            <TableCell>{money(row.serviceCharge)}</TableCell>
-                            <TableCell className="font-semibold">
-                              {money(row.total)}
-                            </TableCell>
-                            <TableCell className="capitalize">
-                              {String(row.method).replace(/_/g, " ")}
-                            </TableCell>
-                            <TableCell>{date(row.paidAt)}</TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={10}
-                            className="h-24 text-center text-muted-foreground"
-                          >
-                            No paid sold items found.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-
-        {scope === "cashier" && (
-          <TabsContent value="shift" className="space-y-4">
-            <ShiftManagementPage embedded />
-          </TabsContent>
-        )}
-      </Tabs>
-    </div>
-  );
-}
-
-export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
-  const [filters, setFilters] = useState({
-    page: 1,
-    per_page: 50,
-    search: "",
-    status: "all",
-    order_type: "all",
-    payment_status: "all",
-    period: "today" as Period,
-    date_from: "",
-    date_to: "",
-  });
-
-  const query = useOrdersQuery(
-    filters,
-    scope === "cashier" ? "cashier" : scope === "waiter" ? "waiter" : "admin",
-  );
-  const orders = query.data?.data ?? [];
-  const meta = query.data?.meta;
-
-  const rows = useMemo(() => {
-    return orders.flatMap((order: Order) => {
-      const bill = (order as any).bill ?? (order as any).billing ?? null;
-      const paymentStatus =
-        bill?.status ?? (order as any).payment_status ?? "issued";
-      return normalizeOrderItems(order).map((item: any) => {
-        const menu = item.menu_item ?? item.menuItem ?? item.menu ?? {};
-        const qty = Number(item.quantity ?? 0);
-        const unit = Number(item.unit_price ?? item.price ?? menu.price ?? 0);
-        return {
-          key: `${order.id}-${item.id ?? item.menu_item_id ?? menu.id ?? Math.random()}`,
-          orderId: order.id,
-          orderNumber: order.order_number ?? `#${order.id}`,
-          orderType: order.order_type ?? "—",
-          paymentStatus,
-          orderStatus: order.status,
-          createdAt: order.created_at,
-          itemName:
-            menu.name ??
-            item.name ??
-            item.menu_item_name ??
-            item.menu_item_id ??
-            "Menu item",
-          image: imageUrlFromMenu(menu || item),
-          qty,
-          unit,
-          total: Number(item.total_price ?? item.line_total ?? qty * unit),
-        };
-      });
-    });
-  }, [orders]);
-
-  const totals = useMemo(
-    () => ({
-      quantity: rows.reduce((sum, row) => sum + row.qty, 0),
-      total: rows.reduce((sum, row) => sum + row.total, 0),
-      paid: rows.filter(
-        (row) => String(row.paymentStatus).toLowerCase() === "paid",
-      ).length,
-      unpaid: rows.filter(
-        (row) => String(row.paymentStatus).toLowerCase() !== "paid",
-      ).length,
-    }),
-    [rows],
-  );
-
-  const updateFilter = (patch: Partial<typeof filters>) =>
-    setFilters((current) => ({ ...current, ...patch, page: 1 }));
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">
-            Ordered items report
-          </h1>
-          <p className="text-muted-foreground">
-            View sold/ordered menu items by today, week, month, year, or custom
-            date interval.
-          </p>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardDescription>Confirmed</CardDescription>
+              <CardTitle>{totals.confirmed}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardDescription>Ready</CardDescription>
+              <CardTitle>{totals.ready}</CardTitle>
+            </CardHeader>
+          </Card>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardDescription>Total cost</CardDescription>
+              <CardTitle>{money(totals.totalCost)}</CardTitle>
+            </CardHeader>
+          </Card>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/dashboard/order-management/orders">See orders</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/dashboard/order-management/orders/create">
-              <Plus className="mr-2 h-4 w-4" />
-              New order
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total item rows</CardDescription>
-            <CardTitle>{rows.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total quantity</CardDescription>
-            <CardTitle>{totals.quantity}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total cost</CardDescription>
-            <CardTitle>{money(totals.total)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Paid / not paid</CardDescription>
-            <CardTitle>
-              {totals.paid} / {totals.unpaid}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
+      )}
 
       <Card className="rounded-2xl">
         <CardHeader className="space-y-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Ordered item list</CardTitle>
+            <CardTitle>Order list and report</CardTitle>
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 className="pl-9 md:w-72"
-                placeholder="Search order/item/customer"
+                placeholder="Search order/customer"
                 value={filters.search}
                 onChange={(e) => updateFilter({ search: e.target.value })}
               />
@@ -919,11 +403,28 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
                 <SelectValue placeholder="Payment status" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All payments</SelectItem>
-                <SelectItem value="issued">Not paid / issued</SelectItem>
+                <SelectItem value="all">All payment status</SelectItem>
+                <SelectItem value="issued">Unpaid / issued</SelectItem>
                 <SelectItem value="partial">Partial</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="credit">Credit pending</SelectItem>
                 <SelectItem value="void">Void</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={filters.payment_type}
+              onValueChange={(payment_type) =>
+                updateFilter({ payment_type })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Payment filter" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All payment types</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="credit">Credit</SelectItem>
               </SelectContent>
             </Select>
 
@@ -950,13 +451,13 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Order number</TableHead>
-                  <TableHead>Item</TableHead>
                   <TableHead>Order type</TableHead>
+                  <TableHead>Table</TableHead>
+                  <TableHead>Waiter name</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Payment status</TableHead>
-                  <TableHead>Qty</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead>Total price</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Cost per order</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -966,62 +467,72 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
                       colSpan={8}
                       className="h-24 text-center text-muted-foreground"
                     >
-                      Loading ordered items...
+                      Loading orders...
                     </TableCell>
                   </TableRow>
-                ) : rows.length ? (
-                  rows.map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>
-                        <Link
-                          className="font-medium hover:underline"
-                          href={`/dashboard/order-management/orders/${row.orderId}`}
-                        >
-                          {row.orderNumber}
-                        </Link>
-                        <div className="mt-1">
-                          <StatusBadge status={row.orderStatus} />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="h-12 w-12 overflow-hidden rounded-lg bg-muted">
-                            {row.image ? (
-                              <img
-                                src={row.image}
-                                alt={row.itemName}
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">
-                                No image
-                              </div>
-                            )}
+                ) : filteredRows.length ? (
+                  filteredRows.map((order: Order) => {
+                    const detailHref = scope === "cashier"
+                      ? `/dashboard/order-management/pos/orders/${order.id}`
+                      : `/dashboard/order-management/orders/${order.id}`;
+                    const waiterName =
+                      (order as any).waiter?.name ??
+                      (order as any).waiter_name ??
+                      (order as any).assigned_waiter?.name ??
+                      (order as any).created_by?.name ??
+                      (order as any).creator?.name ??
+                      "—";
+
+                    return (
+                      <TableRow key={order.id}>
+                        <TableCell>
+                          <Link href={detailHref} className="font-medium hover:underline">
+                            {order.order_number ?? `#${order.id}`}
+                          </Link>
+                          <div className="text-xs text-muted-foreground">
+                            {lineItemsCount(order)} items
                           </div>
-                          <span className="font-medium">{row.itemName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="capitalize">
-                        {String(row.orderType).replace(/_/g, " ")}
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={row.paymentStatus} />
-                      </TableCell>
-                      <TableCell>{row.qty}</TableCell>
-                      <TableCell>{money(row.unit)}</TableCell>
-                      <TableCell className="font-medium">
-                        {money(row.total)}
-                      </TableCell>
-                      <TableCell>{date(row.createdAt)}</TableCell>
-                    </TableRow>
-                  ))
+                        </TableCell>
+                        <TableCell className="capitalize">
+                          {String((order as any).order_type ?? "—").replace(/_/g, " ")}
+                        </TableCell>
+                        <TableCell>
+                          {order.table?.table_number ?? order.table?.name ?? "No table"}
+                        </TableCell>
+                        <TableCell>{waiterName}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={order.status} />
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={order.bill?.status ?? (order as any).payment_status ?? "issued"} />
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {money(order.total ?? order.total_amount)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label="Open order actions">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem asChild>
+                                <Link href={detailHref}>Detail</Link>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 ) : (
                   <TableRow>
                     <TableCell
                       colSpan={8}
                       className="h-24 text-center text-muted-foreground"
                     >
-                      No ordered items found.
+                      No orders found.
                     </TableCell>
                   </TableRow>
                 )}
@@ -1063,6 +574,263 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
   );
 }
 
+export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
+  const [filters, setFilters] = useState({
+    page: 1,
+    per_page: 50,
+    search: "",
+    status: "all",
+    order_type: "all",
+    payment_status: "all",
+    payment_type: "all",
+    period: "today" as Period,
+    date_from: "",
+    date_to: "",
+  });
+
+  const query = useOrdersQuery(
+    filters,
+    scope === "cashier" ? "cashier" : scope === "waiter" ? "waiter" : "admin",
+  );
+  const orders = query.data?.data ?? [];
+  const meta = query.data?.meta;
+
+  const rows = useMemo(() => {
+    return orders
+      .flatMap((order: Order) => {
+        const bill = (order as any).bill ?? (order as any).billing ?? null;
+        const paymentStatus = bill?.status ?? (order as any).payment_status ?? "issued";
+        return normalizeOrderItems(order).map((item: any) => {
+          const menu = item.menu_item ?? item.menuItem ?? item.menu ?? {};
+          const qty = Number(item.quantity ?? 0);
+          const unit = Number(item.unit_price ?? item.price ?? menu.price ?? 0);
+          return {
+            key: `${order.id}-${item.id ?? item.menu_item_id ?? menu.id ?? Math.random()}`,
+            orderId: order.id,
+            orderNumber: order.order_number ?? `#${order.id}`,
+            orderType: order.order_type ?? "—",
+            paymentStatus,
+            orderStatus: order.status,
+            createdAt: (order as any).created_at ?? (order as any).createdAt,
+            itemName: menu.name ?? item.name ?? item.menu_item_name ?? item.menu_item_id ?? "Menu item",
+            image: imageUrlFromMenu(menu || item),
+            qty,
+            unit,
+            total: Number(item.total_price ?? item.line_total ?? qty * unit),
+          };
+        });
+      })
+      .filter((row) => isInsideCustomDateRange(row.createdAt, filters));
+  }, [orders, filters.period, filters.date_from, filters.date_to]);
+
+  const totals = useMemo(
+    () => ({
+      quantity: rows.reduce((sum, row) => sum + row.qty, 0),
+      total: rows.reduce((sum, row) => sum + row.total, 0),
+      paid: rows.filter((row) => String(row.paymentStatus).toLowerCase() === "paid").length,
+      unpaid: rows.filter((row) => String(row.paymentStatus).toLowerCase() !== "paid").length,
+    }),
+    [rows],
+  );
+
+  const updateFilter = (patch: Partial<typeof filters>) =>
+    setFilters((current) => ({ ...current, ...patch, page: 1 }));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Ordered items report</h1>
+          <p className="text-muted-foreground">
+            View sold/ordered menu items by today, week, month, year, or custom date interval.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/order-management/orders">See orders</Link>
+          </Button>
+          <Button asChild>
+            <Link href="/dashboard/order-management/orders/create">
+              <Plus className="mr-2 h-4 w-4" />
+              New order
+            </Link>
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardDescription>Total item rows</CardDescription>
+            <CardTitle>{rows.length}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardDescription>Total quantity</CardDescription>
+            <CardTitle>{totals.quantity}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardDescription>Total cost</CardDescription>
+            <CardTitle>{money(totals.total)}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardHeader className="pb-2">
+            <CardDescription>Paid / not paid</CardDescription>
+            <CardTitle>{totals.paid} / {totals.unpaid}</CardTitle>
+          </CardHeader>
+        </Card>
+      </div>
+
+      <Card className="rounded-2xl">
+        <CardHeader className="space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <CardTitle>Ordered item list</CardTitle>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9 md:w-72"
+                placeholder="Search order/item/customer"
+                value={filters.search}
+                onChange={(e) => updateFilter({ search: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+            <Select value={filters.period} onValueChange={(period: Period) => updateFilter({ period })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="this_week">This week</SelectItem>
+                <SelectItem value="this_month">This month</SelectItem>
+                <SelectItem value="this_year">This year</SelectItem>
+                <SelectItem value="custom">Custom interval</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.status} onValueChange={(status) => updateFilter({ status })}>
+              <SelectTrigger><SelectValue placeholder="Order status" /></SelectTrigger>
+              <SelectContent>
+                {["all", "confirmed", "in_progress", "ready", "served", "completed", "cancel_requested", "cancelled"].map((s) => (
+                  <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.order_type} onValueChange={(order_type) => updateFilter({ order_type })}>
+              <SelectTrigger><SelectValue placeholder="Order type" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="dine_in">Dine in</SelectItem>
+                <SelectItem value="takeaway">Takeaway</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.payment_status} onValueChange={(payment_status) => updateFilter({ payment_status })}>
+              <SelectTrigger><SelectValue placeholder="Payment status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All payment status</SelectItem>
+                <SelectItem value="issued">Not paid / issued</SelectItem>
+                <SelectItem value="partial">Partial</SelectItem>
+                <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="credit">Credit pending</SelectItem>
+                <SelectItem value="void">Void</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={filters.payment_type} onValueChange={(payment_type) => updateFilter({ payment_type })}>
+              <SelectTrigger><SelectValue placeholder="Payment filter" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All payment types</SelectItem>
+                <SelectItem value="cash">Cash</SelectItem>
+                <SelectItem value="credit">Credit</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {filters.period === "custom" && (
+              <>
+                <Input type="date" value={filters.date_from} onChange={(e) => updateFilter({ date_from: e.target.value })} />
+                <Input type="date" value={filters.date_to} onChange={(e) => updateFilter({ date_to: e.target.value })} />
+              </>
+            )}
+          </div>
+        </CardHeader>
+
+        <CardContent>
+          <div className="overflow-x-auto rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Order number</TableHead>
+                  <TableHead>Item</TableHead>
+                  <TableHead>Payment status</TableHead>
+                  <TableHead>Qty</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Total price</TableHead>
+                  <TableHead>Created</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {query.isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading ordered items...</TableCell>
+                  </TableRow>
+                ) : rows.length ? (
+                  rows.map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell>
+                        <Link className="font-medium hover:underline" href={`/dashboard/order-management/orders/${row.orderId}`}>
+                          {row.orderNumber}
+                        </Link>
+                        <div className="mt-1"><StatusBadge status={row.orderStatus} /></div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 overflow-hidden rounded-lg bg-muted">
+                            {row.image ? (
+                              <img src={row.image} alt={row.itemName} className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">No image</div>
+                            )}
+                          </div>
+                          <span className="font-medium">{row.itemName}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell><StatusBadge status={String(row.paymentStatus).toLowerCase() === "paid" ? "paid" : "credit"} /></TableCell>
+                      <TableCell>{row.qty}</TableCell>
+                      <TableCell>{money(row.unit)}</TableCell>
+                      <TableCell className="font-medium">{money(row.total)}</TableCell>
+                      <TableCell>{date(row.createdAt)}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No ordered items found.</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Page {meta?.current_page ?? 1} of {meta?.last_page ?? 1}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={(meta?.current_page ?? 1) <= 1} onClick={() => setFilters({ ...filters, page: Math.max(1, filters.page - 1) })}>Previous</Button>
+              <Button variant="outline" disabled={(meta?.current_page ?? 1) >= (meta?.last_page ?? 1)} onClick={() => setFilters({ ...filters, page: filters.page + 1 })}>Next</Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export function CreateOrderPage({
   scope = "waiter",
   title = "Create order",
@@ -1074,7 +842,7 @@ export function CreateOrderPage({
     table_id: "",
     waiter_id: "",
     order_type: scope === "cashier" ? "takeaway" : "dine_in",
-    payment_type: "regular",
+    payment_type: "cash",
     credit_account_id: "",
     credit_notes: "",
     notes: "",
@@ -1099,10 +867,7 @@ export function CreateOrderPage({
     scope === "cashier" ? "cashier" : "waiter",
   );
   const waitersQuery = useWaitersLiteQuery();
-  const creditAccountsQuery = useCreditAccountsQuery({
-    per_page: 100,
-    status: "active",
-  });
+  const creditAccountsQuery = useCreditAccountsQuery({ per_page: 100, status: "active" });
   const create = useCreateOrderMutation(scope, () => {
     setItems([]);
     setPayload(initialPayload);
@@ -1112,13 +877,11 @@ export function CreateOrderPage({
   const tables = tablesQuery.data?.data ?? [];
   const waiters = waitersQuery.data ?? [];
   const creditAccounts = creditAccountsQuery.data?.data ?? [];
-  const selectedCreditAccount = creditAccounts.find(
-    (account) => String(account.id) === String(payload.credit_account_id),
-  );
-  const creditLimit = Number(selectedCreditAccount?.credit_limit ?? 0);
-  const currentBalance = Number(selectedCreditAccount?.current_balance ?? 0);
-  const remainingLimit = Math.max(0, creditLimit - currentBalance);
   const isCredit = scope === "cashier" && payload.payment_type === "credit";
+  const selectedCreditAccount = creditAccounts.find((account) => String(account.id) === String(payload.credit_account_id));
+  const selectedActiveAgreements = activeAgreements(selectedCreditAccount);
+  const selectedAgreement = selectedActiveAgreements[0];
+  const hasActiveAgreement = !isCredit || Boolean(selectedAgreement);
   const needsTable = payload.order_type === "dine_in";
 
   const total = items.reduce((sum, item) => {
@@ -1132,8 +895,7 @@ export function CreateOrderPage({
     items.length > 0 &&
     (!needsTable || Boolean(payload.table_id)) &&
     (scope !== "cashier" || Boolean(payload.waiter_id)) &&
-    (!isCredit ||
-      (Boolean(payload.credit_account_id) && total <= remainingLimit));
+    (!isCredit || (Boolean(payload.credit_account_id) && hasActiveAgreement));
 
   function menuImage(item: any) {
     const raw =
@@ -1184,11 +946,9 @@ export function CreateOrderPage({
       order_type: payload.order_type as "dine_in" | "takeaway",
       table_id: needsTable ? payload.table_id : null,
       waiter_id: scope === "cashier" ? payload.waiter_id : undefined,
-      payment_type: isCredit ? "credit" : "regular",
+      payment_type: isCredit ? "credit" : "cash",
       credit_account_id: isCredit ? payload.credit_account_id : undefined,
-      credit_notes: isCredit
-        ? payload.credit_notes || payload.notes || undefined
-        : undefined,
+      credit_notes: isCredit ? payload.credit_notes || payload.notes || undefined : undefined,
       notes: payload.notes,
       items,
     });
@@ -1200,7 +960,7 @@ export function CreateOrderPage({
         <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
         <p className="text-muted-foreground">
           {scope === "cashier"
-            ? "Cashier can create dine-in or takeaway orders, select the responsible waiter, and create credit orders directly when a credit account has enough remaining limit."
+            ? "Cashier can create dine-in or takeaway orders, select the responsible waiter, and create credit orders only when the account has an active agreement."
             : "Waiter orders support dine-in and takeaway only. Payment is recorded later by the cashier."}
         </p>
       </div>
@@ -1243,43 +1003,15 @@ export function CreateOrderPage({
               {scope === "cashier" && (
                 <div className="grid gap-2">
                   <Label>Responsible waiter</Label>
-                  <Select
-                    value={payload.waiter_id || undefined}
-                    onValueChange={(waiter_id) =>
-                      setPayload({ ...payload, waiter_id })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue
-                        placeholder={
-                          waitersQuery.isLoading
-                            ? "Loading waiters..."
-                            : "Choose waiter"
-                        }
-                      />
-                    </SelectTrigger>
+                  <Select value={payload.waiter_id || undefined} onValueChange={(waiter_id) => setPayload({ ...payload, waiter_id })}>
+                    <SelectTrigger><SelectValue placeholder={waitersQuery.isLoading ? "Loading waiters..." : "Choose waiter"} /></SelectTrigger>
                     <SelectContent>
-                      {waiters.length ? (
-                        waiters.map((waiter) => (
-                          <SelectItem key={waiter.id} value={String(waiter.id)}>
-                            {waiter.name ??
-                              waiter.email ??
-                              `Waiter ${waiter.id}`}
-                          </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="no-waiters" disabled>
-                          No waiter users found
-                        </SelectItem>
-                      )}
+                      {waiters.length ? waiters.map((waiter) => (
+                        <SelectItem key={waiter.id} value={String(waiter.id)}>{waiter.name ?? waiter.email ?? `Waiter ${waiter.id}`}</SelectItem>
+                      )) : <SelectItem value="no-waiters" disabled>No waiter users found</SelectItem>}
                     </SelectContent>
                   </Select>
-                  {waitersQuery.isError && (
-                    <p className="text-xs text-destructive">
-                      Could not load waiters. Check /cashier/waiters-lite
-                      permission.
-                    </p>
-                  )}
+                  {waitersQuery.isError && <p className="text-xs text-destructive">Could not load waiters. Check /cashier/waiters-lite permission.</p>}
                 </div>
               )}
 
@@ -1332,26 +1064,10 @@ export function CreateOrderPage({
                 <>
                   <div className="grid gap-2">
                     <Label>Payment type</Label>
-                    <Select
-                      value={payload.payment_type}
-                      onValueChange={(payment_type) =>
-                        setPayload({
-                          ...payload,
-                          payment_type,
-                          credit_account_id:
-                            payment_type === "credit"
-                              ? payload.credit_account_id
-                              : "",
-                        })
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
+                    <Select value={payload.payment_type} onValueChange={(payment_type) => setPayload({ ...payload, payment_type, credit_account_id: payment_type === "credit" ? payload.credit_account_id : "" })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="regular">
-                          Regular / pay now later
-                        </SelectItem>
+                        <SelectItem value="cash">Cash</SelectItem>
                         <SelectItem value="credit">Credit</SelectItem>
                       </SelectContent>
                     </Select>
@@ -1360,80 +1076,33 @@ export function CreateOrderPage({
                   {isCredit && (
                     <div className="grid gap-2">
                       <Label>Credit account</Label>
-                      <Select
-                        value={payload.credit_account_id || undefined}
-                        onValueChange={(credit_account_id) =>
-                          setPayload({ ...payload, credit_account_id })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={
-                              creditAccountsQuery.isLoading
-                                ? "Loading credit accounts..."
-                                : "Choose credit account"
-                            }
-                          />
-                        </SelectTrigger>
+                      <Select value={payload.credit_account_id || undefined} onValueChange={(credit_account_id) => setPayload({ ...payload, credit_account_id })}>
+                        <SelectTrigger><SelectValue placeholder={creditAccountsQuery.isLoading ? "Loading credit accounts..." : "Choose credit account"} /></SelectTrigger>
                         <SelectContent>
-                          {creditAccounts.length ? (
-                            creditAccounts.map((account) => {
-                              const limit = Number(account.credit_limit ?? 0);
-                              const used = Number(account.current_balance ?? 0);
-                              const remain = Math.max(0, limit - used);
-                              return (
-                                <SelectItem
-                                  key={account.id}
-                                  value={String(account.id)}
-                                >
-                                  {account.name} • Limit {money(limit)} •
-                                  Remaining {money(remain)}
-                                </SelectItem>
-                              );
-                            })
-                          ) : (
-                            <SelectItem value="no-credit-accounts" disabled>
-                              No active credit accounts found
-                            </SelectItem>
-                          )}
+                          {creditAccounts.length ? creditAccounts.map((account) => {
+                            const activeAgreementCount = activeAgreements(account).length;
+                            return (
+                              <SelectItem key={account.id} value={String(account.id)}>
+                                {account.name} • {account.account_type === "single" ? "Single" : "Bulky"} • {activeAgreementCount ? `${activeAgreementCount} active agreement` : "No active agreement"}
+                              </SelectItem>
+                            );
+                          }) : <SelectItem value="no-credit-accounts" disabled>No active credit accounts found</SelectItem>}
                         </SelectContent>
                       </Select>
                       {selectedCreditAccount && (
                         <div className="rounded-lg border bg-muted/40 p-3 text-xs">
-                          <div className="flex justify-between">
-                            <span>Credit limit</span>
-                            <strong>{money(creditLimit)}</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Used balance</span>
-                            <strong>{money(currentBalance)}</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Remaining limit</span>
-                            <strong>{money(remainingLimit)}</strong>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Current cart total</span>
-                            <strong>{money(total)}</strong>
-                          </div>
+                          <div className="flex justify-between"><span>Active agreement</span><strong>{selectedAgreement?.meal_type ?? "Not available"}</strong></div>
+                          <div className="flex justify-between"><span>Agreement date</span><strong>{selectedAgreement ? `${String(selectedAgreement.start_date).slice(0, 10)} → ${String(selectedAgreement.end_date).slice(0, 10)}` : "—"}</strong></div>
+                          <div className="flex justify-between"><span>Current cart total</span><strong>{money(total)}</strong></div>
                         </div>
                       )}
-                      {isCredit &&
-                        selectedCreditAccount &&
-                        total > remainingLimit && (
-                          <p className="text-xs text-destructive">
-                            Credit limit exceeded. This customer cannot use
-                            credit for this order.
-                          </p>
-                        )}
-                      {creditAccountsQuery.isError && (
-                        <p className="text-xs text-destructive">
-                          Could not load credit accounts. Check
-                          credit.accounts.read permission.
-                        </p>
+                      {isCredit && selectedCreditAccount && !selectedAgreement && (
+                        <p className="text-xs text-destructive">Credit order is not allowed because this account has no active agreement.</p>
                       )}
+                      {creditAccountsQuery.isError && <p className="text-xs text-destructive">Could not load credit accounts. Check credit.accounts.read permission.</p>}
                     </div>
                   )}
+
                 </>
               )}
 
@@ -1638,20 +1307,13 @@ export function CreateOrderPage({
               </p>
             )}
             {scope === "cashier" && !payload.waiter_id && (
-              <p className="text-xs text-muted-foreground">
-                Select the responsible waiter before creating the order.
-              </p>
+              <p className="text-xs text-muted-foreground">Select the responsible waiter before creating the order.</p>
             )}
             {isCredit && !payload.credit_account_id && (
-              <p className="text-xs text-muted-foreground">
-                Select a credit account before creating a credit order.
-              </p>
+              <p className="text-xs text-muted-foreground">Select a credit account before creating a credit order.</p>
             )}
-            {isCredit && selectedCreditAccount && total > remainingLimit && (
-              <p className="text-xs text-destructive">
-                Credit limit exceeded. Remaining limit is{" "}
-                {money(remainingLimit)}.
-              </p>
+            {isCredit && selectedCreditAccount && !selectedAgreement && (
+              <p className="text-xs text-destructive">Credit order is not allowed because this account has no active agreement.</p>
             )}
             <Button
               className="w-full"
@@ -1667,25 +1329,6 @@ export function CreateOrderPage({
   );
 }
 
-function printStorageKey(orderId: string | number, kind: string) {
-  return `restaurant-order-print:${orderId}:${kind}`;
-}
-
-function wasPrinted(
-  orderId: string | number | undefined,
-  kind: string,
-  version = 0,
-) {
-  void version;
-  if (!orderId || typeof window === "undefined") return false;
-  return window.localStorage.getItem(printStorageKey(orderId, kind)) === "1";
-}
-
-function markPrinted(orderId: string | number | undefined, kind: string) {
-  if (!orderId || typeof window === "undefined") return;
-  window.localStorage.setItem(printStorageKey(orderId, kind), "1");
-}
-
 export function OrderDetailPage({
   id,
   scope = "waiter",
@@ -1696,60 +1339,176 @@ export function OrderDetailPage({
   const query = useOrderQuery(id, scope);
   const confirm = useConfirmOrderMutation();
   const serve = useServeOrderMutation();
-  const cancel = useRequestCancelOrderMutation();
-  const [paymentOpen, setPaymentOpen] = useState(false);
-  const [creditOpen, setCreditOpen] = useState(false);
-  const [printVersion, setPrintVersion] = useState(0);
-  const [payment, setPayment] = useState({
-    amount: 0,
+  const addItemMutation = useAddOrderItemMutation();
+  const updateItemMutation = useUpdateOrderItemMutation();
+  const removeItemMutation = useRemoveOrderItemMutation();
+  const printBillMutation = usePrintOrderBillMutation();
+
+  const [itemDialogOpen, setItemDialogOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<any | null>(null);
+  const [itemSearch, setItemSearch] = useState("");
+  const [itemPayload, setItemPayload] = useState({
+    menu_item_id: "",
+    quantity: 1,
+    notes: "",
+  });
+  const [billDialogOpen, setBillDialogOpen] = useState(false);
+  const [billPayload, setBillPayload] = useState({
+    customer_name: "Guest",
+    customer_tin: "",
     payment_method: "cash",
-    reference_number: "",
-    notes: "",
   });
-  const [creditPayload, setCreditPayload] = useState({
-    credit_account_id: "",
-    notes: "",
-  });
-  const accountsQuery = useCreditAccountsQuery({
-    per_page: 100,
-    status: "active",
-  });
-const recordPayment = useRecordBillPaymentMutation();
-const convertCredit = useConvertBillToCreditMutation();
 
   const order = normalizeOrderResponse(query.data);
   const items = normalizeOrderItems(order);
   const status = order?.status;
   const bill = (order as any)?.bill ?? (order as any)?.billing ?? null;
-  const paymentStatus =
-    bill?.status ?? (order as any)?.payment_status ?? "issued";
+  const paymentStatus = bill?.status ?? (order as any)?.payment_status ?? "issued";
+  const orderType = String(order?.order_type ?? "—").replace(/_/g, " ");
   const orderTotal =
     order?.total ??
     order?.total_amount ??
     bill?.total ??
     bill?.total_amount ??
-    0;
-  const billId = bill?.id ?? (order as any)?.bill_id;
-  const canTakePayment =
-    scope === "cashier" &&
-    billId &&
-    !["paid", "void", "refunded"].includes(String(paymentStatus).toLowerCase());
-  const canConvertCredit =
-    Boolean(billId) &&
-    !["paid", "void", "refunded"].includes(String(paymentStatus).toLowerCase());
-  const canPrintBeforePayment =
-    scope === "cashier" &&
-    order &&
-    !["paid", "void", "refunded"].includes(String(paymentStatus).toLowerCase());
-  const triggerPrint = (kind: "customer" | "kitchen" | "bar" | "bill") => {
-    if (!order) return;
-    if (kind === "customer") printCustomerOrderTicket(order);
-    if (kind === "kitchen") printKitchenTicket(order);
-    if (kind === "bar") printBarTicket(order);
-    if (kind === "bill") printOrderBill(order);
-    markPrinted(order.id, kind);
-    setPrintVersion((value) => value + 1);
-  };
+    items.reduce(
+      (sum: number, item: any) =>
+        sum +
+        Number(
+          item.total_price ??
+            item.line_total ??
+            Number(item.unit_price ?? item.price ?? 0) * Number(item.quantity ?? 0),
+        ),
+      0,
+    );
+
+  const billLocked = Boolean(
+    (order as any)?.bill_printed_at ||
+      (order as any)?.bill_locked ||
+      (order as any)?.locked_at ||
+      bill?.printed_at ||
+      bill?.is_printed ||
+      bill?.printed ||
+      ["paid", "credit", "void", "refunded"].includes(String(paymentStatus).toLowerCase()),
+  );
+
+  const menuQuery = useMenuItemsQuery(
+    {
+      per_page: 200,
+      available: 1,
+      is_available: 1,
+      active: 1,
+      is_active: 1,
+      search: itemSearch,
+    },
+    scope === "cashier" ? "cashier" : "waiter",
+  );
+  const menuItems = menuQuery.data?.data ?? [];
+
+  function itemTitle(item: any) {
+    return (
+      item.menu_item?.name ??
+      item.menuItem?.name ??
+      item.name ??
+      item.menu_item_name ??
+      item.menu_item_id ??
+      "Menu item"
+    );
+  }
+
+  function openAddItemDialog() {
+    if (billLocked) return;
+    setEditingItem(null);
+    setItemPayload({ menu_item_id: "", quantity: 1, notes: "" });
+    setItemDialogOpen(true);
+  }
+
+  function openEditItemDialog(item: any) {
+    if (billLocked) return;
+    setEditingItem(item);
+    setItemPayload({
+      menu_item_id: String(item.menu_item_id ?? item.menu_item?.id ?? item.menuItem?.id ?? ""),
+      quantity: Number(item.quantity ?? 1),
+      notes: item.notes ?? item.note ?? "",
+    });
+    setItemDialogOpen(true);
+  }
+
+  function submitItemForm() {
+    if (!order?.id || billLocked) return;
+
+    if (editingItem) {
+      const itemId = editingItem.id ?? editingItem.order_item_id;
+      if (!itemId) return;
+      updateItemMutation.mutate(
+        {
+          orderId: order.id,
+          itemId,
+          payload: {
+            quantity: Math.max(1, Number(itemPayload.quantity || 1)),
+            notes: itemPayload.notes || null,
+          },
+        },
+        {
+          onSuccess: () => {
+            setItemDialogOpen(false);
+            query.refetch();
+          },
+        },
+      );
+      return;
+    }
+
+    if (!itemPayload.menu_item_id) return;
+    addItemMutation.mutate(
+      {
+        orderId: order.id,
+        payload: {
+          menu_item_id: itemPayload.menu_item_id,
+          quantity: Math.max(1, Number(itemPayload.quantity || 1)),
+          notes: itemPayload.notes || null,
+        },
+      },
+      {
+        onSuccess: () => {
+          setItemDialogOpen(false);
+          query.refetch();
+        },
+      },
+    );
+  }
+
+  function removeItem(item: any) {
+    if (!order?.id || billLocked) return;
+    const itemId = item.id ?? item.order_item_id;
+    if (!itemId) return;
+    if (!window.confirm("Remove this order item?")) return;
+    removeItemMutation.mutate(
+      { orderId: order.id, itemId },
+      { onSuccess: () => query.refetch() },
+    );
+  }
+
+  function handlePrintBill() {
+    if (!order?.id || billLocked) return;
+    printBillMutation.mutate(
+      {
+        orderId: order.id,
+        payload: {
+          customer_name: billPayload.customer_name || "Guest",
+          customer_tin: billPayload.customer_tin || null,
+          payment_method: billPayload.payment_method,
+        },
+      },
+      {
+        onSuccess: (response: any) => {
+          const printedOrder = normalizeOrderResponse(response) ?? order;
+          printOrderBillDocument(printedOrder as any);
+          setBillDialogOpen(false);
+          query.refetch();
+        },
+      },
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -1759,19 +1518,11 @@ const convertCredit = useConvertBillToCreditMutation();
             Order {order?.order_number ?? id}
           </h1>
           <p className="text-muted-foreground">
-            Full order status, items, billing and credit state.
+            Print order ticket, print bill, and manage items before the bill is printed.
           </p>
         </div>
         <Button variant="outline" asChild>
-          <Link
-            href={
-              scope === "cashier"
-                ? "/dashboard/order-management/pos/orders"
-                : "/dashboard/order-management/orders"
-            }
-          >
-            Back to orders
-          </Link>
+          <Link href="/dashboard/order-management/pos/orders">Back to POS orders</Link>
         </Button>
       </div>
 
@@ -1786,8 +1537,7 @@ const convertCredit = useConvertBillToCreditMutation();
       {query.isError && (
         <Card className="rounded-2xl border-destructive/30">
           <CardContent className="p-6 text-sm text-destructive">
-            Could not load this order. Check the waiter order detail endpoint
-            and permission.
+            Could not load this order. Check the order detail endpoint and permission.
           </CardContent>
         </Card>
       )}
@@ -1796,275 +1546,116 @@ const convertCredit = useConvertBillToCreditMutation();
         <>
           <Card className="rounded-2xl">
             <CardHeader>
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <CardTitle>Summary</CardTitle>
-                <div className="flex flex-wrap gap-2">
-                  {canPrintBeforePayment &&
-                    !wasPrinted(order?.id, "customer", printVersion) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => triggerPrint("customer")}
-                      >
-                        Print order ticket
-                      </Button>
-                    )}
-                  {canPrintBeforePayment &&
-                    !wasPrinted(order?.id, "kitchen", printVersion) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => triggerPrint("kitchen")}
-                      >
-                        Print kitchen ticket
-                      </Button>
-                    )}
-                  {canPrintBeforePayment &&
-                    !wasPrinted(order?.id, "bar", printVersion) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => triggerPrint("bar")}
-                      >
-                        Print bar ticket
-                      </Button>
-                    )}
-                  {canPrintBeforePayment &&
-                    !wasPrinted(order?.id, "bill", printVersion) && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => triggerPrint("bill")}
-                      >
-                        Print bill before payment
-                      </Button>
-                    )}
-                  {canConfirmOrder(status) && (
-                    <Button
-                      size="sm"
-                      disabled={confirm.isPending}
-                      onClick={() => confirm.mutate(order.id)}
-                    >
-                      Confirm
-                    </Button>
-                  )}
-                  {canServeOrder(status) && (
-                    <Button
-                      size="sm"
-                      disabled={serve.isPending}
-                      onClick={() => serve.mutate(order.id)}
-                    >
-                      Mark served
-                    </Button>
-                  )}
-                  {canTakePayment && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setPayment({
-                          ...payment,
-                          amount: Number(
-                            bill?.balance_amount ?? orderTotal ?? 0,
-                          ),
-                        });
-                        setPaymentOpen(true);
-                      }}
-                    >
-                      Record payment
-                    </Button>
-                  )}
-                  {canRequestCancelOrder(status) && (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      disabled={cancel.isPending}
-                      onClick={() =>
-                        cancel.mutate({
-                          id: order.id,
-                          reason: "Requested from order detail page",
-                        })
-                      }
-                    >
-                      Request cancel
-                    </Button>
-                  )}
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <CardTitle>Items</CardTitle>
+                  <CardDescription>
+                    {billLocked
+                      ? "Bill is printed or locked. Items are read-only and no actions are available."
+                      : "Add, edit, or remove items before printing the bill."}
+                  </CardDescription>
                 </div>
+
+                {!billLocked && (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => printCustomerOrderTicket(order as any)}>
+                      Print order ticket
+                    </Button>
+                    <Button size="sm" onClick={() => setBillDialogOpen(true)}>
+                      Print bill
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={openAddItemDialog}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add more item
+                    </Button>
+                    {canConfirmOrder(status) && (
+                      <Button size="sm" variant="outline" disabled={confirm.isPending} onClick={() => confirm.mutate(order.id)}>
+                        Confirm
+                      </Button>
+                    )}
+                    {canServeOrder(status) && (
+                      <Button size="sm" variant="outline" disabled={serve.isPending} onClick={() => serve.mutate(order.id)}>
+                        Mark served
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-5">
-              <div>
-                <Label>Status</Label>
-                <div className="mt-1">
-                  <StatusBadge status={status} />
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 rounded-xl border bg-muted/20 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div>
+                  <Label>Order status</Label>
+                  <div className="mt-1"><StatusBadge status={status} /></div>
+                </div>
+                <div>
+                  <Label>Order type</Label>
+                  <p className="mt-1 capitalize">{orderType}</p>
+                </div>
+                <div>
+                  <Label>Payment status</Label>
+                  <div className="mt-1"><StatusBadge status={paymentStatus} /></div>
+                </div>
+                <div>
+                  <Label>Total</Label>
+                  <p className="mt-1 font-semibold">{money(orderTotal)}</p>
                 </div>
               </div>
-              <div>
-                <Label>Payment status</Label>
-                <div className="mt-1">
-                  <StatusBadge status={paymentStatus} />
-                </div>
-              </div>
-              <div>
-                <Label>Order type</Label>
-                <p className="mt-1 capitalize">
-                  {String(order.order_type ?? "—").replace(/_/g, " ")}
-                </p>
-              </div>
-              <div>
-                <Label>Total</Label>
-                <p className="mt-1 font-semibold">{money(orderTotal)}</p>
-              </div>
-              <div>
-                <Label>Created</Label>
-                <p className="mt-1">{date(order.created_at)}</p>
-              </div>
-              <div>
-                <Label>Table</Label>
-                <p className="mt-1">
-                  {order.table?.table_number ?? order.table?.name ?? "No table"}
-                </p>
-              </div>
-              <div>
-                <Label>Customer</Label>
-                <p className="mt-1">
-                  {order.customer?.name ?? order.customer_name ?? "Guest"}
-                </p>
-              </div>
-              <div className="md:col-span-3">
-                <Label>Notes</Label>
-                <p className="mt-1 text-muted-foreground">
-                  {order.notes || "—"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
 
-          <Dialog open={paymentOpen} onOpenChange={setPaymentOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Record bill payment</DialogTitle>
-              </DialogHeader>
-              <div className="grid gap-4">
-                <div className="grid gap-2">
-                  <Label>Amount</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    value={payment.amount}
-                    onChange={(e) =>
-                      setPayment({ ...payment, amount: Number(e.target.value) })
-                    }
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Method</Label>
-                  <Select
-                    value={payment.payment_method}
-                    onValueChange={(payment_method) =>
-                      setPayment({ ...payment, payment_method })
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="cash">Cash</SelectItem>
-                      <SelectItem value="card">Card</SelectItem>
-                      <SelectItem value="mobile">Mobile</SelectItem>
-                      <SelectItem value="transfer">Transfer</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Reference</Label>
-                  <Input
-                    value={payment.reference_number}
-                    onChange={(e) =>
-                      setPayment({
-                        ...payment,
-                        reference_number: e.target.value,
-                      })
-                    }
-                  />
-                </div>
-                <Button
-                  disabled={
-                    !billId || payment.amount <= 0 || recordPayment.isPending
-                  }
-                  onClick={() =>
-                    billId &&
-                    recordPayment.mutate({
-                      billId,
-                      payload: {
-                        amount: payment.amount,
-                        payment_method: payment.payment_method as any,
-                        reference_number: payment.reference_number,
-                        notes: payment.notes,
-                      },
-                    })
-                  }
-                >
-                  Save payment
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <Card className="rounded-2xl">
-            <CardHeader>
-              <CardTitle>Items</CardTitle>
-            </CardHeader>
-            <CardContent>
               <div className="overflow-x-auto rounded-xl border">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
+                      <TableHead>Order type</TableHead>
+                      <TableHead>Payment status</TableHead>
                       <TableHead>Qty</TableHead>
                       <TableHead>Unit price</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Item status</TableHead>
                       <TableHead>Total</TableHead>
+                      {!billLocked && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {items.length ? (
-                      items.map((item: any) => (
-                        <TableRow
-                          key={item.id ?? `${item.menu_item_id}-${item.name}`}
-                        >
-                          <TableCell>
-                            {item.menu_item?.name ??
-                              item.menuItem?.name ??
-                              item.name ??
-                              item.menu_item_name ??
-                              item.menu_item_id}
-                          </TableCell>
-                          <TableCell>{item.quantity}</TableCell>
-                          <TableCell>
-                            {money(item.unit_price ?? item.price)}
-                          </TableCell>
-                          <TableCell>
-                            <StatusBadge
-                              status={item.item_status ?? item.status}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {money(
-                              item.total_price ??
-                                item.line_total ??
-                                Number(item.unit_price ?? item.price ?? 0) *
-                                  Number(item.quantity ?? 0),
+                      items.map((item: any) => {
+                        const total =
+                          item.total_price ??
+                          item.line_total ??
+                          Number(item.unit_price ?? item.price ?? 0) * Number(item.quantity ?? 0);
+
+                        return (
+                          <TableRow key={item.id ?? `${item.menu_item_id}-${item.name}`}>
+                            <TableCell>
+                              <div className="font-medium">{itemTitle(item)}</div>
+                              {(item.notes || item.note) && (
+                                <div className="mt-1 text-xs text-muted-foreground">{item.notes ?? item.note}</div>
+                              )}
+                            </TableCell>
+                            <TableCell className="capitalize">{orderType}</TableCell>
+                            <TableCell><StatusBadge status={paymentStatus} /></TableCell>
+                            <TableCell>{item.quantity}</TableCell>
+                            <TableCell>{money(item.unit_price ?? item.price)}</TableCell>
+                            <TableCell><StatusBadge status={item.item_status ?? item.status} /></TableCell>
+                            <TableCell className="font-medium">{money(total)}</TableCell>
+                            {!billLocked && (
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button size="sm" variant="outline" onClick={() => openEditItemDialog(item)}>
+                                    Edit
+                                  </Button>
+                                  <Button size="sm" variant="destructive" onClick={() => removeItem(item)}>
+                                    Remove
+                                  </Button>
+                                </div>
+                              </TableCell>
                             )}
-                          </TableCell>
-                        </TableRow>
-                      ))
+                          </TableRow>
+                        );
+                      })
                     ) : (
                       <TableRow>
-                        <TableCell
-                          colSpan={5}
-                          className="h-24 text-center text-muted-foreground"
-                        >
+                        <TableCell colSpan={billLocked ? 7 : 8} className="h-24 text-center text-muted-foreground">
                           No items found for this order.
                         </TableCell>
                       </TableRow>
@@ -2074,6 +1665,109 @@ const convertCredit = useConvertBillToCreditMutation();
               </div>
             </CardContent>
           </Card>
+
+          <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{editingItem ? "Edit order item" : "Add more item"}</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4">
+                {!editingItem && (
+                  <div className="grid gap-2">
+                    <Label>Search menu</Label>
+                    <Input value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Search food or drink" />
+                  </div>
+                )}
+                <div className="grid gap-2">
+                  <Label>Menu item</Label>
+                  <Select
+                    disabled={Boolean(editingItem)}
+                    value={itemPayload.menu_item_id || undefined}
+                    onValueChange={(menu_item_id) => setItemPayload({ ...itemPayload, menu_item_id })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={menuQuery.isLoading ? "Loading menu..." : "Choose menu item"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {menuItems.length ? (
+                        menuItems.map((menu) => (
+                          <SelectItem key={menu.id} value={String(menu.id)}>
+                            {menu.name} - {money(menu.price)}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="no-menu-items" disabled>No menu items found</SelectItem>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Quantity</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={itemPayload.quantity}
+                    onChange={(event) => setItemPayload({ ...itemPayload, quantity: Number(event.target.value) })}
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notes</Label>
+                  <Textarea value={itemPayload.notes} onChange={(event) => setItemPayload({ ...itemPayload, notes: event.target.value })} />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setItemDialogOpen(false)}>Cancel</Button>
+                  <Button
+                    disabled={
+                      billLocked ||
+                      (!editingItem && !itemPayload.menu_item_id) ||
+                      itemPayload.quantity <= 0 ||
+                      addItemMutation.isPending ||
+                      updateItemMutation.isPending
+                    }
+                    onClick={submitItemForm}
+                  >
+                    {editingItem ? "Update item" : "Add item"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={billDialogOpen} onOpenChange={setBillDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Print bill</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label>Customer name</Label>
+                  <Input value={billPayload.customer_name} onChange={(event) => setBillPayload({ ...billPayload, customer_name: event.target.value })} placeholder="Guest" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>TIN number optional</Label>
+                  <Input value={billPayload.customer_tin} onChange={(event) => setBillPayload({ ...billPayload, customer_tin: event.target.value })} placeholder="Optional customer TIN" />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Payment method</Label>
+                  <Select value={billPayload.payment_method} onValueChange={(payment_method) => setBillPayload({ ...billPayload, payment_method })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="card">Card</SelectItem>
+                      <SelectItem value="mobile">Mobile Money</SelectItem>
+                      <SelectItem value="transfer">Bank</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setBillDialogOpen(false)}>Cancel</Button>
+                  <Button disabled={printBillMutation.isPending || billLocked} onClick={handlePrintBill}>
+                    {printBillMutation.isPending ? "Printing..." : "Print bill"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </div>
@@ -2104,40 +1798,20 @@ export function CreditAccountsPage() {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [payload, setPayload] = useState<CreditForm>(emptyPayload);
-  const [filters, setFilters] = useState({
-    page: 1,
-    per_page: 10,
-    search: "",
-    account_type: "all",
-    status: "all",
-  });
+  const [filters, setFilters] = useState({ page: 1, per_page: 10, search: "", account_type: "all", status: "all" });
 
   const query = useCreditAccountsQuery(filters);
-const createAccount = useCreateCreditAccountMutation();
-const updateAccount = useUpdateCreditAccountMutation();
+  const createAccount = useCreateCreditAccountMutation(closeForm);
+  const updateAccount = useUpdateCreditAccountMutation(closeForm);
   const toggleAccount = useToggleCreditAccountMutation();
   const accounts = query.data?.data ?? [];
   const meta = query.data?.meta;
 
   const summary = useMemo(() => {
-    const limit = accounts.reduce(
-      (sum, account) => sum + Number(account.credit_limit ?? 0),
-      0,
-    );
-    const balance = accounts.reduce(
-      (sum, account) => sum + Number(account.current_balance ?? 0),
-      0,
-    );
-    const active = accounts.filter(
-      (account) =>
-        String(account.status ?? "active") === "active" &&
-        Boolean(Number(account.is_credit_enabled ?? 1)),
-    ).length;
-    const blocked = accounts.filter(
-      (account) =>
-        String(account.status ?? "") === "blocked" ||
-        !Boolean(Number(account.is_credit_enabled ?? 1)),
-    ).length;
+    const limit = accounts.reduce((sum, account) => sum + Number(account.credit_limit ?? 0), 0);
+    const balance = accounts.reduce((sum, account) => sum + Number(account.current_balance ?? 0), 0);
+    const active = accounts.filter((account) => String(account.status ?? "active") === "active" && Boolean(Number(account.is_credit_enabled ?? 1))).length;
+    const blocked = accounts.filter((account) => String(account.status ?? "") === "blocked" || !Boolean(Number(account.is_credit_enabled ?? 1))).length;
     return { limit, balance, active, blocked };
   }, [accounts]);
 
@@ -2168,10 +1842,7 @@ const updateAccount = useUpdateCreditAccountMutation();
   }
 
   function submitAccount() {
-    const body = {
-      ...payload,
-      credit_limit: Number(payload.credit_limit ?? 0),
-    };
+    const body = { ...payload, credit_limit: Number(payload.credit_limit ?? 0) };
     if (editingId) updateAccount.mutate({ id: editingId, payload: body });
     else createAccount.mutate(body);
   }
@@ -2187,42 +1858,16 @@ const updateAccount = useUpdateCreditAccountMutation();
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Credit Accounts</h1>
-          <p className="text-muted-foreground">
-            Create and manage customer, staff, student, and organization credit
-            accounts used during cashier credit settlement.
-          </p>
+          <p className="text-muted-foreground">Create and manage customer, staff, student, and organization credit accounts used during cashier credit settlement.</p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          New credit account
-        </Button>
+        <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" />New credit account</Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Active accounts</CardDescription>
-            <CardTitle>{summary.active}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Blocked / disabled</CardDescription>
-            <CardTitle>{summary.blocked}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total credit limit</CardDescription>
-            <CardTitle>{money(summary.limit)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Outstanding balance</CardDescription>
-            <CardTitle>{money(summary.balance)}</CardTitle>
-          </CardHeader>
-        </Card>
+        <Card className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>Active accounts</CardDescription><CardTitle>{summary.active}</CardTitle></CardHeader></Card>
+        <Card className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>Blocked / disabled</CardDescription><CardTitle>{summary.blocked}</CardTitle></CardHeader></Card>
+        <Card className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>Total credit limit</CardDescription><CardTitle>{money(summary.limit)}</CardTitle></CardHeader></Card>
+        <Card className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>Outstanding balance</CardDescription><CardTitle>{money(summary.balance)}</CardTitle></CardHeader></Card>
       </div>
 
       <Card className="rounded-2xl">
@@ -2231,24 +1876,12 @@ const updateAccount = useUpdateCreditAccountMutation();
             <CardTitle>Credit account list</CardTitle>
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="pl-9 md:w-72"
-                placeholder="Search account name"
-                value={filters.search}
-                onChange={(event) =>
-                  updateFilter({ search: event.target.value })
-                }
-              />
+              <Input className="pl-9 md:w-72" placeholder="Search account name" value={filters.search} onChange={(event) => updateFilter({ search: event.target.value })} />
             </div>
           </div>
           <div className="grid gap-2 md:grid-cols-3">
-            <Select
-              value={filters.account_type}
-              onValueChange={(account_type) => updateFilter({ account_type })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Account type" />
-              </SelectTrigger>
+            <Select value={filters.account_type} onValueChange={(account_type) => updateFilter({ account_type })}>
+              <SelectTrigger><SelectValue placeholder="Account type" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All types</SelectItem>
                 <SelectItem value="customer">Customer</SelectItem>
@@ -2257,33 +1890,15 @@ const updateAccount = useUpdateCreditAccountMutation();
                 <SelectItem value="student">Student</SelectItem>
               </SelectContent>
             </Select>
-            <Select
-              value={filters.status}
-              onValueChange={(status) => updateFilter({ status })}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
+            <Select value={filters.status} onValueChange={(status) => updateFilter({ status })}>
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="blocked">Blocked</SelectItem>
               </SelectContent>
             </Select>
-            <Button
-              variant="outline"
-              onClick={() =>
-                setFilters({
-                  page: 1,
-                  per_page: 10,
-                  search: "",
-                  account_type: "all",
-                  status: "all",
-                })
-              }
-            >
-              Reset filters
-            </Button>
+            <Button variant="outline" onClick={() => setFilters({ page: 1, per_page: 10, search: "", account_type: "all", status: "all" })}>Reset filters</Button>
           </div>
         </CardHeader>
 
@@ -2304,73 +1919,27 @@ const updateAccount = useUpdateCreditAccountMutation();
               </TableHeader>
               <TableBody>
                 {query.isLoading ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      Loading credit accounts...
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading credit accounts...</TableCell></TableRow>
                 ) : accounts.length ? (
                   accounts.map((account) => {
                     const limit = Number(account.credit_limit ?? 0);
                     const balance = Number(account.current_balance ?? 0);
-                    const enabled = Boolean(
-                      Number(account.is_credit_enabled ?? 1),
-                    );
+                    const enabled = Boolean(Number(account.is_credit_enabled ?? 1));
                     return (
                       <TableRow key={account.id}>
-                        <TableCell>
-                          <div className="font-medium">{account.name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Created {date(account.created_at)}
-                          </div>
-                        </TableCell>
-                        <TableCell className="capitalize">
-                          {account.account_type ?? "customer"}
-                        </TableCell>
+                        <TableCell><div className="font-medium">{account.name}</div><div className="text-xs text-muted-foreground">Created {date(account.created_at)}</div></TableCell>
+                        <TableCell className="capitalize">{account.account_type ?? "customer"}</TableCell>
                         <TableCell>{money(limit)}</TableCell>
                         <TableCell>{money(balance)}</TableCell>
-                        <TableCell>
-                          {money(Math.max(0, limit - balance))}
-                        </TableCell>
-                        <TableCell className="capitalize">
-                          {String(
-                            account.settlement_cycle ?? "monthly",
-                          ).replace(/_/g, " ")}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <StatusBadge
-                              status={
-                                account.status ??
-                                (enabled ? "active" : "blocked")
-                              }
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {enabled ? "Credit enabled" : "Credit disabled"}
-                            </span>
-                          </div>
-                        </TableCell>
+                        <TableCell>{money(Math.max(0, limit - balance))}</TableCell>
+                        <TableCell className="capitalize">{String(account.settlement_cycle ?? "monthly").replace(/_/g, " ")}</TableCell>
+                        <TableCell><div className="flex flex-col gap-1"><StatusBadge status={account.status ?? (enabled ? "active" : "blocked")} /><span className="text-xs text-muted-foreground">{enabled ? "Credit enabled" : "Credit disabled"}</span></div></TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu modal={false}>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon">
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
+                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() => openEdit(account)}
-                              >
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => toggleAccount.mutate(account.id)}
-                              >
-                                {enabled ? "Disable credit" : "Enable credit"}
-                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEdit(account)}>Edit</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => toggleAccount.mutate(account.id)}>{enabled ? "Disable credit" : "Enable credit"}</DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </TableCell>
@@ -2378,187 +1947,34 @@ const updateAccount = useUpdateCreditAccountMutation();
                     );
                   })
                 ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={8}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      No credit accounts found. Create one to allow credit
-                      settlement.
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No credit accounts found. Create one to allow credit settlement.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
 
           <div className="mt-4 flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              Page {meta?.current_page ?? 1} of {meta?.last_page ?? 1}
-            </p>
+            <p className="text-sm text-muted-foreground">Page {meta?.current_page ?? 1} of {meta?.last_page ?? 1}</p>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                disabled={(meta?.current_page ?? 1) <= 1}
-                onClick={() =>
-                  setFilters({
-                    ...filters,
-                    page: Math.max(1, filters.page - 1),
-                  })
-                }
-              >
-                Previous
-              </Button>
-              <Button
-                variant="outline"
-                disabled={(meta?.current_page ?? 1) >= (meta?.last_page ?? 1)}
-                onClick={() =>
-                  setFilters({ ...filters, page: filters.page + 1 })
-                }
-              >
-                Next
-              </Button>
+              <Button variant="outline" disabled={(meta?.current_page ?? 1) <= 1} onClick={() => setFilters({ ...filters, page: Math.max(1, filters.page - 1) })}>Previous</Button>
+              <Button variant="outline" disabled={(meta?.current_page ?? 1) >= (meta?.last_page ?? 1)} onClick={() => setFilters({ ...filters, page: filters.page + 1 })}>Next</Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <Dialog
-        open={open}
-        onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : closeForm())}
-      >
+      <Dialog open={open} onOpenChange={(nextOpen) => (nextOpen ? setOpen(true) : closeForm())}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {editingId ? "Edit credit account" : "Create credit account"}
-            </DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{editingId ? "Edit credit account" : "Create credit account"}</DialogTitle></DialogHeader>
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2 md:col-span-2">
-              <Label>Account name</Label>
-              <Input
-                value={payload.name}
-                onChange={(event) =>
-                  setPayload({ ...payload, name: event.target.value })
-                }
-                placeholder="Example: ICT Department, Staff Meal Account"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Account type</Label>
-              <Select
-                value={payload.account_type}
-                onValueChange={(account_type) =>
-                  setPayload({ ...payload, account_type })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="customer">Customer</SelectItem>
-                  <SelectItem value="organization">Organization</SelectItem>
-                  <SelectItem value="staff">Staff</SelectItem>
-                  <SelectItem value="student">Student</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Credit limit</Label>
-              <Input
-                type="number"
-                min={0}
-                value={payload.credit_limit}
-                onChange={(event) =>
-                  setPayload({
-                    ...payload,
-                    credit_limit: Number(event.target.value),
-                  })
-                }
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Settlement cycle</Label>
-              <Select
-                value={payload.settlement_cycle}
-                onValueChange={(settlement_cycle) =>
-                  setPayload({ ...payload, settlement_cycle })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="daily">Daily</SelectItem>
-                  <SelectItem value="weekly">Weekly</SelectItem>
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Status</Label>
-              <Select
-                value={payload.status}
-                onValueChange={(status) => setPayload({ ...payload, status })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="blocked">Blocked</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Credit enabled</Label>
-              <Select
-                value={payload.is_credit_enabled ? "yes" : "no"}
-                onValueChange={(value) =>
-                  setPayload({ ...payload, is_credit_enabled: value === "yes" })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="yes">Yes</SelectItem>
-                  <SelectItem value="no">No</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Requires approval</Label>
-              <Select
-                value={payload.requires_approval ? "yes" : "no"}
-                onValueChange={(value) =>
-                  setPayload({ ...payload, requires_approval: value === "yes" })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="no">No</SelectItem>
-                  <SelectItem value="yes">Yes</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="md:col-span-2 flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={closeForm}>
-                Cancel
-              </Button>
-              <Button
-                disabled={!payload.name || saving}
-                onClick={submitAccount}
-              >
-                {saving
-                  ? "Saving..."
-                  : editingId
-                    ? "Update account"
-                    : "Save account"}
-              </Button>
-            </div>
+            <div className="grid gap-2 md:col-span-2"><Label>Account name</Label><Input value={payload.name} onChange={(event) => setPayload({ ...payload, name: event.target.value })} placeholder="Example: ICT Department, Staff Meal Account" /></div>
+            <div className="grid gap-2"><Label>Account type</Label><Select value={payload.account_type} onValueChange={(account_type) => setPayload({ ...payload, account_type })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bulky">Bulky</SelectItem><SelectItem value="single">Single</SelectItem></SelectContent></Select></div>
+            <div className="grid gap-2"><Label>Agreement value</Label><Input type="number" min={0} value={payload.credit_limit} onChange={(event) => setPayload({ ...payload, credit_limit: Number(event.target.value) })} /></div>
+            <div className="grid gap-2"><Label>Representative phone</Label><Select value={payload.settlement_cycle} onValueChange={(settlement_cycle) => setPayload({ ...payload, settlement_cycle })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="monthly">Monthly</SelectItem></SelectContent></Select></div>
+            <div className="grid gap-2"><Label>Status</Label><Select value={payload.status} onValueChange={(status) => setPayload({ ...payload, status })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="blocked">Blocked</SelectItem></SelectContent></Select></div>
+            <div className="grid gap-2"><Label>Credit enabled</Label><Select value={payload.is_credit_enabled ? "yes" : "no"} onValueChange={(value) => setPayload({ ...payload, is_credit_enabled: value === "yes" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem></SelectContent></Select></div>
+            <div className="grid gap-2"><Label>Credit enabled</Label><Select value={payload.requires_approval ? "yes" : "no"} onValueChange={(value) => setPayload({ ...payload, requires_approval: value === "yes" })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="no">No</SelectItem><SelectItem value="yes">Yes</SelectItem></SelectContent></Select></div>
+            <div className="md:col-span-2 flex justify-end gap-2 pt-2"><Button variant="outline" onClick={closeForm}>Cancel</Button><Button disabled={!payload.name || saving} onClick={submitAccount}>{saving ? "Saving..." : editingId ? "Update account" : "Save account"}</Button></div>
           </div>
         </DialogContent>
       </Dialog>
@@ -2576,13 +1992,10 @@ export function CreditOrdersPage() {
     search: "",
   });
 
-  const accountsQuery = useCreditAccountsQuery({
-    per_page: 200,
-    status: "active",
-  });
+  const accountsQuery = useCreditAccountsQuery({ per_page: 200, status: "active" });
   const query = useCreditOrdersQuery(filters);
   const approve = useApproveCreditOrderMutation();
-const settlement = useSettleCreditOrderMutation();
+  const settlement = useSettleCreditOrderMutation(() => setSettle(null));
   const rows = query.data?.data ?? [];
 
   function updateFilter(patch: Partial<typeof filters>) {
@@ -2595,8 +2008,7 @@ const settlement = useSettleCreditOrderMutation();
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Credit Orders</h1>
           <p className="text-muted-foreground">
-            View cashier-created credit orders, filter by credit account,
-            approve, and record settlements.
+            View cashier-created credit orders, filter by credit account, approve, and record settlements.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2615,42 +2027,24 @@ const settlement = useSettleCreditOrderMutation();
       <Card className="rounded-2xl">
         <CardHeader>
           <CardTitle>Filters</CardTitle>
-          <CardDescription>
-            Filter the credit order list by credit account, status, or
-            reference.
-          </CardDescription>
+          <CardDescription>Filter the credit order list by credit account, status, or reference.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
           <div className="grid gap-2">
             <Label>Credit account</Label>
             <Select
               value={filters.credit_account_id}
-              onValueChange={(credit_account_id) =>
-                updateFilter({ credit_account_id })
-              }
+              onValueChange={(credit_account_id) => updateFilter({ credit_account_id })}
             >
               <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    accountsQuery.isLoading
-                      ? "Loading accounts..."
-                      : "All credit accounts"
-                  }
-                />
+                <SelectValue placeholder={accountsQuery.isLoading ? "Loading accounts..." : "All credit accounts"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All credit accounts</SelectItem>
                 {(accountsQuery.data?.data ?? []).map((account) => {
-                  const remaining =
-                    Number(account.remaining_limit ?? 0) ||
-                    Math.max(
-                      0,
-                      Number(account.credit_limit ?? 0) -
-                        Number(account.current_balance ?? 0),
-                    );
                   return (
                     <SelectItem key={account.id} value={String(account.id)}>
-                      {account.name} • Remaining {money(remaining)}
+                      {account.name}
                     </SelectItem>
                   );
                 })}
@@ -2660,20 +2054,13 @@ const settlement = useSettleCreditOrderMutation();
 
           <div className="grid gap-2">
             <Label>Status</Label>
-            <Select
-              value={filters.status}
-              onValueChange={(status) => updateFilter({ status })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
+            <Select value={filters.status} onValueChange={(status) => updateFilter({ status })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="credit_pending">Pending approval</SelectItem>
                 <SelectItem value="credit_approved">Approved</SelectItem>
-                <SelectItem value="partially_settled">
-                  Partially settled
-                </SelectItem>
+                <SelectItem value="partially_settled">Partially settled</SelectItem>
                 <SelectItem value="fully_settled">Fully settled</SelectItem>
                 <SelectItem value="overdue">Overdue</SelectItem>
               </SelectContent>
@@ -2708,47 +2095,26 @@ const settlement = useSettleCreditOrderMutation();
             </TableHeader>
             <TableBody>
               {query.isLoading ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={8}
-                    className="h-24 text-center text-muted-foreground"
-                  >
-                    Loading credit orders...
-                  </TableCell>
-                </TableRow>
+                <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading credit orders...</TableCell></TableRow>
               ) : rows.length ? (
                 rows.map((c) => {
                   const account = c.credit_account ?? c.account;
                   const status = String(c.status ?? "").toLowerCase();
-                  const canApprove = ["pending", "credit_pending"].includes(
-                    status,
-                  );
-                  const canSettle =
-                    !["fully_settled", "cancelled", "rejected"].includes(
-                      status,
-                    ) && Number(c.remaining_amount ?? 0) > 0;
+                  const canApprove = ["pending", "credit_pending"].includes(status);
+                  const canSettle = !["fully_settled", "cancelled", "rejected"].includes(status) && Number(c.remaining_amount ?? 0) > 0;
 
                   return (
                     <TableRow key={c.id}>
-                      <TableCell>
-                        {c.credit_reference ?? c.order?.order_number ?? c.id}
-                      </TableCell>
+                      <TableCell>{c.credit_reference ?? c.order?.order_number ?? c.id}</TableCell>
                       <TableCell>{account?.name ?? "—"}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={c.status} />
-                      </TableCell>
+                      <TableCell><StatusBadge status={c.status} /></TableCell>
                       <TableCell>{money(c.total_amount)}</TableCell>
                       <TableCell>{money(c.paid_amount)}</TableCell>
                       <TableCell>{money(c.remaining_amount)}</TableCell>
                       <TableCell>{date(c.created_at)}</TableCell>
                       <TableCell className="text-right">
                         {canApprove && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={approve.isPending}
-                            onClick={() => approve.mutate(c.id)}
-                          >
+                          <Button size="sm" variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(c.id)}>
                             Approve
                           </Button>
                         )}
@@ -2769,15 +2135,7 @@ const settlement = useSettleCreditOrderMutation();
                   );
                 })
               ) : (
-                <TableRow>
-                  <TableCell
-                    colSpan={8}
-                    className="h-24 text-center text-muted-foreground"
-                  >
-                    No credit orders found for the selected filters. Cashier
-                    creates credit orders directly from POS order creation.
-                  </TableCell>
-                </TableRow>
+                <TableRow><TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No credit orders found for the selected filters. Cashier creates credit orders directly from POS order creation.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -2819,88 +2177,36 @@ const settlement = useSettleCreditOrderMutation();
   );
 }
 
-export function PrepTicketsPage({
-  kind = "kitchen",
-}: {
-  kind?: "kitchen" | "bar";
-}) {
-  const [filters, setFilters] = useState({
-    status: "all",
-    scope: "today",
-    per_page: 30,
-  });
+export function PrepTicketsPage({ kind = "kitchen" }: { kind?: "kitchen" | "bar" }) {
+  const [filters, setFilters] = useState({ status: "all", scope: "today", per_page: 30 });
   const query = usePrepTicketsQuery(kind, filters);
   const action = usePrepTicketActionMutation();
   const rows = query.data?.data ?? [];
   const title = kind === "kitchen" ? "Kitchen Tickets" : "Bar Tickets";
 
   function ticketName(ticket: any) {
-    return (
-      ticket.menu_item?.name ??
-      ticket.order_item?.menu_item?.name ??
-      ticket.order_item?.name ??
-      ticket.item_name ??
-      "Ticket item"
-    );
+    return ticket.menu_item?.name ?? ticket.order_item?.menu_item?.name ?? ticket.order_item?.name ?? ticket.item_name ?? "Ticket item";
   }
 
-  function canAccept(status?: string) {
-    return ["pending", "confirmed"].includes(
-      String(status ?? "").toLowerCase(),
-    );
-  }
-  function canReady(status?: string) {
-    return ["preparing"].includes(String(status ?? "").toLowerCase());
-  }
-  function canServed(status?: string) {
-    return ["ready"].includes(String(status ?? "").toLowerCase());
-  }
+  function canAccept(status?: string) { return ["pending", "confirmed"].includes(String(status ?? "").toLowerCase()); }
+  function canReady(status?: string) { return ["preparing"].includes(String(status ?? "").toLowerCase()); }
+  function canServed(status?: string) { return ["ready"].includes(String(status ?? "").toLowerCase()); }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
-          <p className="text-muted-foreground">
-            Accept confirmed tickets, mark preparation ready, and close served
-            items.
-          </p>
+          <p className="text-muted-foreground">Accept confirmed tickets, mark preparation ready, and close served items.</p>
         </div>
         <div className="flex gap-2">
-          <Select
-            value={filters.scope}
-            onValueChange={(scope) => setFilters({ ...filters, scope })}
-          >
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="all_open">All open</SelectItem>
-            </SelectContent>
+          <Select value={filters.scope} onValueChange={(scope) => setFilters({ ...filters, scope })}>
+            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="today">Today</SelectItem><SelectItem value="all_open">All open</SelectItem></SelectContent>
           </Select>
-          <Select
-            value={filters.status}
-            onValueChange={(status) => setFilters({ ...filters, status })}
-          >
-            <SelectTrigger className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {[
-                "all",
-                "confirmed",
-                "preparing",
-                "ready",
-                "served",
-                "rejected",
-                "delayed",
-              ].map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s.replace(/_/g, " ")}
-                </SelectItem>
-              ))}
-            </SelectContent>
+          <Select value={filters.status} onValueChange={(status) => setFilters({ ...filters, status })}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>{["all", "confirmed", "preparing", "ready", "served", "rejected", "delayed"].map((s) => <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>
@@ -2908,155 +2214,35 @@ export function PrepTicketsPage({
       <div className="grid gap-4 md:grid-cols-4">
         {[
           ["Total", rows.length],
-          [
-            "Confirmed",
-            rows.filter(
-              (r: any) => r.status === "confirmed" || r.status === "pending",
-            ).length,
-          ],
-          [
-            "Preparing",
-            rows.filter((r: any) => r.status === "preparing").length,
-          ],
+          ["Confirmed", rows.filter((r: any) => r.status === "confirmed" || r.status === "pending").length],
+          ["Preparing", rows.filter((r: any) => r.status === "preparing").length],
           ["Ready", rows.filter((r: any) => r.status === "ready").length],
-        ].map(([label, value]) => (
-          <Card key={String(label)} className="rounded-2xl">
-            <CardHeader className="pb-2">
-              <CardDescription>{label}</CardDescription>
-              <CardTitle>{value}</CardTitle>
-            </CardHeader>
-          </Card>
-        ))}
+        ].map(([label, value]) => <Card key={String(label)} className="rounded-2xl"><CardHeader className="pb-2"><CardDescription>{label}</CardDescription><CardTitle>{value}</CardTitle></CardHeader></Card>)}
       </div>
 
       <Card className="rounded-2xl">
         <CardContent className="pt-6">
           <div className="overflow-x-auto rounded-xl border">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Ticket</TableHead>
-                  <TableHead>Order</TableHead>
-                  <TableHead>Item</TableHead>
-                  <TableHead>Waiter/Table</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+              <TableHeader><TableRow><TableHead>Ticket</TableHead><TableHead>Order</TableHead><TableHead>Item</TableHead><TableHead>Waiter/Table</TableHead><TableHead>Status</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
               <TableBody>
-                {query.isLoading ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      Loading tickets...
-                    </TableCell>
-                  </TableRow>
-                ) : rows.length ? (
-                  rows.map((ticket: any) => {
-                    const status = String(
-                      ticket.status ?? "confirmed",
-                    ).toLowerCase();
-                    return (
-                      <TableRow key={ticket.id}>
-                        <TableCell className="font-medium">
-                          {ticket.ticket_number ?? `#${ticket.id}`}
-                        </TableCell>
-                        <TableCell>
-                          {ticket.order?.order_number ?? ticket.order_id ?? "—"}
-                        </TableCell>
-                        <TableCell>
-                          {ticketName(ticket)}
-                          <div className="text-xs text-muted-foreground">
-                            Qty:{" "}
-                            {ticket.order_item?.quantity ??
-                              ticket.quantity ??
-                              1}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {ticket.waiter?.name ??
-                            ticket.order?.waiter?.name ??
-                            "—"}
-                          <div className="text-xs text-muted-foreground">
-                            {ticket.table?.table_number ??
-                              ticket.order?.table?.table_number ??
-                              "No table"}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <StatusBadge status={status} />
-                        </TableCell>
-                        <TableCell>{date(ticket.created_at)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            {canAccept(status) && (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  action.mutate({
-                                    kind,
-                                    id: ticket.id,
-                                    action: "accept",
-                                  })
-                                }
-                              >
-                                Accept
-                              </Button>
-                            )}
-                            {canReady(status) && (
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  action.mutate({
-                                    kind,
-                                    id: ticket.id,
-                                    action: "ready",
-                                  })
-                                }
-                              >
-                                Ready
-                              </Button>
-                            )}
-                            {canServed(status) && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  action.mutate({
-                                    kind,
-                                    id: ticket.id,
-                                    action: "served",
-                                  })
-                                }
-                              >
-                                Served
-                              </Button>
-                            )}
-                            {!canAccept(status) &&
-                              !canReady(status) &&
-                              !canServed(status) && (
-                                <Button size="sm" variant="ghost" disabled>
-                                  No action
-                                </Button>
-                              )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={7}
-                      className="h-24 text-center text-muted-foreground"
-                    >
-                      No tickets found.
-                    </TableCell>
-                  </TableRow>
-                )}
+                {query.isLoading ? <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">Loading tickets...</TableCell></TableRow> : rows.length ? rows.map((ticket: any) => {
+                  const status = String(ticket.status ?? "confirmed").toLowerCase();
+                  return <TableRow key={ticket.id}>
+                    <TableCell className="font-medium">{ticket.ticket_number ?? `#${ticket.id}`}</TableCell>
+                    <TableCell>{ticket.order?.order_number ?? ticket.order_id ?? "—"}</TableCell>
+                    <TableCell>{ticketName(ticket)}<div className="text-xs text-muted-foreground">Qty: {ticket.order_item?.quantity ?? ticket.quantity ?? 1}</div></TableCell>
+                    <TableCell>{ticket.waiter?.name ?? ticket.order?.waiter?.name ?? "—"}<div className="text-xs text-muted-foreground">{ticket.table?.table_number ?? ticket.order?.table?.table_number ?? "No table"}</div></TableCell>
+                    <TableCell><StatusBadge status={status} /></TableCell>
+                    <TableCell>{date(ticket.created_at)}</TableCell>
+                    <TableCell className="text-right"><div className="flex justify-end gap-2">
+                      {canAccept(status) && <Button size="sm" onClick={() => action.mutate({ kind, id: ticket.id, action: "accept" })}>Accept</Button>}
+                      {canReady(status) && <Button size="sm" onClick={() => action.mutate({ kind, id: ticket.id, action: "ready" })}>Ready</Button>}
+                      {canServed(status) && <Button size="sm" variant="outline" onClick={() => action.mutate({ kind, id: ticket.id, action: "served" })}>Served</Button>}
+                      {!canAccept(status) && !canReady(status) && !canServed(status) && <Button size="sm" variant="ghost" disabled>No action</Button>}
+                    </div></TableCell>
+                  </TableRow>;
+                }) : <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">No tickets found.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </div>
@@ -3070,18 +2256,10 @@ function useOrderScopeForRole(): Scope {
   const [scope, setScope] = useState<Scope>("admin");
   useEffect(() => {
     try {
-      const roles = JSON.parse(localStorage.getItem("roles") || "[]").map(
-        (role: string) => String(role).toLowerCase(),
-      );
+      const roles = JSON.parse(localStorage.getItem("roles") || "[]").map((role: string) => String(role).toLowerCase());
       const user = JSON.parse(localStorage.getItem("user") || "null");
       const roleText = [...roles, String(user?.role ?? "")].join(" ");
-      setScope(
-        roleText.includes("waiter")
-          ? "waiter"
-          : roleText.includes("cashier")
-            ? "cashier"
-            : "admin",
-      );
+      setScope(roleText.includes("waiter") ? "waiter" : roleText.includes("cashier") ? "cashier" : "admin");
     } catch {
       setScope("admin");
     }
@@ -3091,33 +2269,12 @@ function useOrderScopeForRole(): Scope {
 
 export function RoleAwareOrdersPage() {
   const scope = useOrderScopeForRole();
-  return (
-    <OrdersPage
-      scope={scope}
-      title={
-        scope === "cashier"
-          ? "POS Orders"
-          : scope === "waiter"
-            ? "My Orders"
-            : "Order Management"
-      }
-      createHref={
-        scope === "cashier"
-          ? "/dashboard/order-management/pos/orders/create"
-          : "/dashboard/order-management/orders/create"
-      }
-    />
-  );
+  return <OrdersPage scope={scope} title={scope === "cashier" ? "POS Orders" : scope === "waiter" ? "My Orders" : "Order Management"} createHref={scope === "cashier" ? "/dashboard/order-management/pos/orders/create" : "/dashboard/order-management/orders/create"} />;
 }
 
 export function RoleAwareCreateOrderPage() {
   const scope = useOrderScopeForRole();
-  return (
-    <CreateOrderPage
-      scope={scope === "cashier" ? "cashier" : "waiter"}
-      title={scope === "cashier" ? "Create POS Order" : "Create Order"}
-    />
-  );
+  return <CreateOrderPage scope={scope === "cashier" ? "cashier" : "waiter"} title={scope === "cashier" ? "Create POS Order" : "Create Order"} />;
 }
 
 export function RoleAwareOrderDetailPage({ id }: { id: string }) {
