@@ -13,6 +13,7 @@ import type {
   RecipeIntegrityRow,
   RecipePayload,
   StockAdjustmentPayload,
+  DepartmentStockoutPayload,
   StockValuationRow,
   TransferPayload,
   WastePayload,
@@ -197,6 +198,11 @@ export const inventoryService = {
       ...payload,
       reason: payload.reason ?? payload.note ?? "Waste / damage recorded",
     });
+    return unwrap<ApiEnvelope<InventoryTransaction>>(response);
+  },
+
+  async stockOutItem(id: number | string, payload: DepartmentStockoutPayload, roleScope: InventoryRoleScope = "stock-keeper") {
+    const response = await api.post(`${rolePrefix(roleScope)}/inventory/items/${id}/stockout`, payload);
     return unwrap<ApiEnvelope<InventoryTransaction>>(response);
   },
 

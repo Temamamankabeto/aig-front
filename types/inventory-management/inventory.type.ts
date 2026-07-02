@@ -27,6 +27,9 @@ export interface InventoryListParams {
   low_stock?: boolean;
   per_page?: number;
   page?: number;
+  type?: string;
+  reference_type?: string;
+  inventory_item_id?: number | string;
 }
 
 export interface MenuItemOption {
@@ -109,6 +112,12 @@ export interface WastePayload {
   quantity: number;
   reason?: string;
   note?: string;
+}
+
+export interface DepartmentStockoutPayload {
+  quantity: number;
+  department: string;
+  reason: string;
 }
 
 export interface TransferPayload {

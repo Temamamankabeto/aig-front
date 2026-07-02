@@ -3,13 +3,15 @@
 import Link from "next/link";
 import {
   AlertTriangle,
-  ArrowDownToLine,
   ArrowRight,
   BarChart3,
   Boxes,
   ClipboardList,
   Package,
   PackageCheck,
+  PlusCircle,
+  SlidersHorizontal,
+  Trash2,
   RefreshCcw,
   TrendingUp,
   Warehouse,
@@ -76,22 +78,40 @@ export default function StockKeeperDashboardPage() {
 
   const quickActions = [
     {
-      title: "Manage Inventory",
-      description: "Items, receiving, adjustments, waste, movements, and batches in one workspace.",
-      href: "/dashboard/inventory/items",
-      icon: Warehouse,
+      title: "Request Purchase",
+      description: "Create purchase requests for required stock items.",
+      href: "/dashboard/purchases/requests",
+      icon: PlusCircle,
     },
     {
-      title: "Receive Stock",
-      description: "Receive manager-approved purchase orders into inventory.",
-      href: "/dashboard/inventory/items?tab=receiving",
+      title: "Receive Approved Purchase",
+      description: "Receive approved purchase orders into inventory batches.",
+      href: "/dashboard/purchases/receiving",
       icon: PackageCheck,
     },
     {
-      title: "Stock Movements",
-      description: "Audit recent stock-in, stock-out, adjustment, and waste records.",
-      href: "/dashboard/inventory/items?tab=movements",
+      title: "Record Department Stockout",
+      description: "Issue stock out to Kitchen, Bar, or another department.",
+      href: "/dashboard/inventory/stockout",
       icon: ClipboardList,
+    },
+    {
+      title: "Adjust Stock",
+      description: "Correct stock balances after physical counting.",
+      href: "/dashboard/inventory/adjustments",
+      icon: SlidersHorizontal,
+    },
+    {
+      title: "Waste / Damage",
+      description: "Record damaged, expired, or wasted stock.",
+      href: "/dashboard/inventory/waste",
+      icon: Trash2,
+    },
+    {
+      title: "Stock Movements",
+      description: "Audit stock-in, stock-out, adjustment, and waste records.",
+      href: "/dashboard/inventory/movements",
+      icon: Warehouse,
     },
   ];
 
@@ -106,14 +126,14 @@ export default function StockKeeperDashboardPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight md:text-3xl">Stock Keeper Dashboard</h1>
             <p className="text-sm text-muted-foreground">
-              Live inventory performance, low-stock risk, batch availability, and movement overview.
+              Live purchase receiving, department stockout, adjustments, waste/damage, batch availability, and movement overview.
             </p>
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
-            <Link href="/dashboard/inventory/items">Open Inventory Workspace</Link>
+            <Link href="/dashboard/stock-keeper/stock-workspace">Open Store Keeper Workspace</Link>
           </Button>
           <Button
             type="button"

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Edit, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, Search } from "lucide-react";
+import { Edit, KeyRound, Loader2, MoreHorizontal, RefreshCw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,13 +14,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   useAllPermissionsQuery,
   useAssignRolePermissionsMutation,
-  useCreateRoleMutation,
   useRolePermissionsQuery,
   useRolesQuery,
   useUpdateRoleMutation,
 } from "@/hooks";
 import { roleSchema } from "@/lib/schemas/role.schema";
-import type { RoleItem, RolePayload } from "@/types/user-management/user.type";
+import type { RoleItem } from "@/types/user-management/user.type";
 
 function moduleName(permission: string) {
   return permission.split(/[._:-]/)[0] || "general";
@@ -40,9 +39,8 @@ export default function RolesPage() {
   const permissionsCatalogQuery = useAllPermissionsQuery();
   const rolePermissionsQuery = useRolePermissionsQuery(selectedRole?.id);
 
-  const createRole = useCreateRoleMutation(() => { setFormOpen(false); setRoleName(""); });
-  const updateRole = useUpdateRoleMutation(() => { setFormOpen(false); setSelectedRole(null); setRoleName(""); });
-  const assignPermissions = useAssignRolePermissionsMutation(() => setPermissionsOpen(false));
+  const updateRole = useUpdateRoleMutation();
+  const assignPermissions = useAssignRolePermissionsMutation();
 
   const rows = rolesQuery.data?.data ?? [];
   const meta = rolesQuery.data?.meta;
@@ -66,12 +64,6 @@ export default function RolesPage() {
     window.setTimeout(action, 0);
   }
 
-  function openCreate() {
-    setSelectedRole(null);
-    setRoleName("");
-    setFormOpen(true);
-  }
-
   function openEdit(role: RoleItem) {
     setSelectedRole(role);
     setRoleName(role.name);
@@ -86,10 +78,19 @@ export default function RolesPage() {
 
   function submitRole(event: FormEvent) {
     event.preventDefault();
+    if (!selectedRole) return;
+
     const parsed = roleSchema.parse({ name: roleName });
-    const payload: RolePayload = { name: parsed.name };
-    if (selectedRole) updateRole.mutate({ id: selectedRole.id, payload });
-    else createRole.mutate(payload);
+    updateRole.mutate(
+      { id: selectedRole.id, payload: { name: parsed.name } },
+      {
+        onSuccess: () => {
+          setFormOpen(false);
+          setSelectedRole(null);
+          setRoleName("");
+        },
+      }
+    );
   }
 
   function togglePermission(permission: string) {
@@ -103,14 +104,13 @@ export default function RolesPage() {
 
   function submitPermissions() {
     if (!selectedRole) return;
-    assignPermissions.mutate({ id: selectedRole.id, payload: { permissions: selectedPermissions } });
+    assignPermissions.mutate({ id: selectedRole.id, payload: { permissions: selectedPermissions } }, { onSuccess: () => setPermissionsOpen(false) });
   }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-        <div><h1 className="text-2xl font-bold">Roles</h1><p className="text-muted-foreground">Create roles and assign backend permissions.</p></div>
-        <Button onClick={openCreate}><Plus className="mr-2 h-4 w-4" /> New Role</Button>
+        <div><h1 className="text-2xl font-bold">Roles</h1><p className="text-muted-foreground">View roles and manage assigned backend permissions.</p></div>
       </div>
 
       <Card>
@@ -153,10 +153,10 @@ export default function RolesPage() {
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{selectedRole ? "Edit Role" : "Create Role"}</DialogTitle><DialogDescription>Role names must exist with the sanctum guard in the backend.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Edit Role</DialogTitle><DialogDescription>Role names must exist with the sanctum guard in the backend.</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={submitRole}>
             <div className="grid gap-2"><Label>Role Name</Label><Input value={roleName} onChange={(event) => setRoleName(event.target.value)} placeholder="Cashier" required /></div>
-            <Button className="w-full" disabled={createRole.isPending || updateRole.isPending}>{(createRole.isPending || updateRole.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save role</Button>
+            <Button className="w-full" disabled={updateRole.isPending}>{updateRole.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save role</Button>
           </form>
         </DialogContent>
       </Dialog>

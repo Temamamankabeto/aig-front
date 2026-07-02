@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Loader2,
   Package,
+  PackageMinus,
   RefreshCcw,
   ShieldCheck,
   ShoppingCart,
@@ -171,6 +172,12 @@ export default function FBControllerDashboardPage() {
       description: "Review stock risk, waste trend, recipe integrity, and valuation.",
       href: "/dashboard/fb-controller/inventory-forecast",
       icon: Package,
+    },
+    {
+      title: "Kitchen & Bar Stockout Report",
+      description: "Review stockout items issued to kitchen and bar departments.",
+      href: "/dashboard/fb-controller/stockout-report",
+      icon: PackageMinus,
     },
     {
       title: "Recipe Module",
@@ -353,7 +360,7 @@ export default function FBControllerDashboardPage() {
           <CardHeader>
             <CardTitle className="text-sm">Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
+          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {actionCards.map((item) => {
               const Icon = item.icon;
               return (

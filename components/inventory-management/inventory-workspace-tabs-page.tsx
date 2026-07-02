@@ -57,7 +57,7 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
     ? {
         value: "purchase-approval",
         label: "Purchase Approval",
-        status: "fb_validated",
+        status: "food_validated",
         scope: "admin" as const,
         content: <PurchaseApprovalTabPage />,
       }

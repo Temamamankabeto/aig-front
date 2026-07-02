@@ -56,7 +56,6 @@ export type OrderFilters = {
   date_from?: string;
   date_to?: string;
   credit_account_id?: Id;
-  waiter_id?: Id | string;
   page?: number;
   per_page?: number;
   active?: boolean | number | string;
@@ -129,7 +128,12 @@ export type OrderPayload = {
   credit_account_id?: Id | null;
   credit_account_user_id?: Id | null;
   credit_account_user_ids?: Id[];
+  credit_agreement_id?: Id | null;
   credit_notes?: string | null;
+  credit_order_mode?: 'order_based' | 'beef_based';
+  meal_type?: string | null;
+  number_of_person?: number | null;
+  customer_tin?: string | null;
   notes?: string | null;
   discount?: number;
   items: OrderItemPayload[];
@@ -193,6 +197,12 @@ export type Order = {
   payment_type?: PaymentType | string;
   credit_status?: CreditStatus | null;
   credit_account_id?: Id | null;
+  credit_agreement_id?: Id | null;
+  credit_order_mode?: 'order_based' | 'beef_based' | string | null;
+  meal_type?: string | null;
+  number_of_person?: number | string | null;
+  customer_tin?: string | null;
+  bill_printed_at?: string | null;
   subtotal?: number | string;
   tax?: number | string;
   service_charge?: number | string;
@@ -262,33 +272,69 @@ export type CreditAccountUserPayload = {
   is_active?: boolean;
 };
 
+export type CreditAgreement = {
+  id: Id;
+  credit_account_id?: Id;
+  meal_type: string;
+  agreement_type?: 'order_based' | 'beef_based' | string;
+  number_of_person?: number | string;
+  single_person_name?: string | null;
+  price_per_person?: number | string;
+  start_date?: string;
+  end_date?: string;
+  total_price?: number | string;
+  agreement_letter_path?: string | null;
+  agreement_letter_url?: string | null;
+  status?: 'active' | 'disabled' | 'expired' | string;
+  is_active_now?: boolean;
+  created_at?: string;
+};
+
+export type CreditAgreementPayload = {
+  meal_type: string;
+  agreement_type?: 'order_based' | 'beef_based' | string;
+  number_of_person: number;
+  single_person_name?: string | null;
+  price_per_person: number;
+  start_date: string;
+  end_date: string;
+  total_price?: number | null;
+  status?: 'active' | 'disabled' | 'expired' | string;
+  agreement_letter?: File | null;
+};
+
 export type CreditAccount = {
   id: Id;
   name: string;
-  account_type?: string;
+  account_type?: 'bulky' | 'single' | string;
+  tin_number?: string | null;
+  representative_name?: string | null;
+  representative_phone?: string | null;
   customer_id?: Id | null;
   organization_id?: Id | null;
-  credit_limit?: number | string;
-  current_balance?: number | string;
-  remaining_limit?: number | string;
   is_credit_enabled?: boolean | number;
-  requires_approval?: boolean | number;
-  settlement_cycle?: string;
   status?: string;
   created_at?: string;
   authorized_users?: CreditAccountUser[];
   authorizedUsers?: CreditAccountUser[];
+  agreements?: CreditAgreement[];
+  active_agreements?: CreditAgreement[];
+  activeAgreements?: CreditAgreement[];
+  // Legacy read-only fields kept optional for backward compatibility only.
+  credit_limit?: number | string;
+  current_balance?: number | string;
+  remaining_limit?: number | string;
+  requires_approval?: boolean | number;
+  settlement_cycle?: string;
 };
 
 export type CreditAccountPayload = {
   name: string;
-  account_type?: string;
-  customer_id?: Id | null;
-  organization_id?: Id | null;
-  credit_limit: number;
+  account_type?: 'bulky' | 'single' | string;
+  tin_number?: string | null;
+  representative_name?: string | null;
+  representative_phone?: string | null;
   is_credit_enabled?: boolean;
-  requires_approval?: boolean;
-  settlement_cycle?: string;
   status?: string;
 };
 
@@ -304,6 +350,8 @@ export type CreditOrder = {
   credit_account_user?: CreditAccountUser | null;
   authorized_user?: CreditAccountUser | null;
   credit_account_user_id?: Id | null;
+  credit_agreement_id?: Id | null;
+  agreement?: CreditAgreement | null;
   used_by_name?: string | null;
   used_by_phone?: string | null;
   total_amount?: number | string;
@@ -318,6 +366,7 @@ export type ConvertCreditPayload = {
   credit_account_id: Id;
   credit_account_user_id?: Id | null;
   credit_account_user_ids?: Id[];
+  credit_agreement_id?: Id | null;
   notes?: string | null;
 };
 
@@ -376,6 +425,7 @@ export type PackageOrderPayload = {
   credit_account_id?: Id | null;
   credit_account_user_id?: Id | null;
   credit_account_user_ids?: Id[];
+  credit_agreement_id?: Id | null;
   credit_notes?: string;
   notes?: string;
 };

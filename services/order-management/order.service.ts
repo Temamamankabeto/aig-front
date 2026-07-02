@@ -1,5 +1,5 @@
 import api, { unwrap } from '@/lib/api';
-import type { ApiEnvelope, CreditAccount, CreditAccountPayload, CreditOrder, CreditSettlementPayload, Order, OrderFilters, OrderPayload, PackageOrder, PackageOrderPayload, PackageOrderSchedulePayload, PackagePayload, PackageTemplate, PaginatedResponse, PrepTicket, PaymentPayload, ConvertCreditPayload, LiteUser } from '@/types/order-management';
+import type { ApiEnvelope, Id, CreditAccount, CreditAccountPayload, CreditAgreement, CreditAgreementPayload, CreditOrder, CreditSettlementPayload, Order, OrderFilters, OrderPayload, PackageOrder, PackageOrderPayload, PackageOrderSchedulePayload, PackagePayload, PackageTemplate, PaginatedResponse, PrepTicket, PaymentPayload, ConvertCreditPayload, LiteUser, PaymentMethod } from '@/types/order-management';
 
 function clean(params: Record<string, unknown> = {}) { const out: Record<string, unknown> = {}; Object.entries(params).forEach(([k,v]) => { if (v !== undefined && v !== null && v !== '' && v !== 'all') out[k] = v; }); return out; }
 function rows<T>(body: any): T[] { const d = body?.data; if (Array.isArray(body)) return body; if (Array.isArray(d)) return d; if (Array.isArray(d?.data)) return d.data; return []; }
@@ -22,8 +22,6 @@ function listEndpoint(scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') {
 export const orderService = {
   async waiters(search = '') { const res = await api.get('/cashier/waiters-lite', { params: clean({ search }) }); return rows<LiteUser>(res.data); },
   async orders(params: OrderFilters = {}, scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') { const res = await api.get(listEndpoint(scope), { params: clean(params) }); return page<Order>(res.data); },
-  async cashierPayments(params: OrderFilters = {}) { const res = await api.get('/cashier/payments', { params: clean(params) }); return page<any>(res.data); },
-  async cashierSoldItems(params: OrderFilters = {}) { const res = await api.get('/cashier/payments/sold-items', { params: clean(params) }); return page<any>(res.data); },
   async order(id: string|number, scope: 'waiter'|'cashier'|'public'|'admin' = 'admin') {
     const endpoints = scope === 'waiter'
       ? [`/waiter/orders/${id}`, `/admin/orders/${id}`, `/orders/${id}`]
@@ -54,11 +52,25 @@ export const orderService = {
     throw lastError;
   },
   async createOrder(payload: OrderPayload, scope: 'waiter'|'cashier'|'public'|'admin' = 'waiter') { const res = await api.post(baseEndpoint(scope), payload); return unwrap<ApiEnvelope<Order>>(res); },
-  async confirmOrder(id: string|number) { const res = await api.post(`/waiter/orders/${id}/confirm`); return unwrap<ApiEnvelope<Order>>(res); },
+  async confirmOrder(id: string|number) {
+    try {
+      const res = await api.post(`/cashier/orders/${id}/confirm`);
+      return unwrap<ApiEnvelope<Order>>(res);
+    } catch (error) {
+      const res = await api.post(`/waiter/orders/${id}/confirm`);
+      return unwrap<ApiEnvelope<Order>>(res);
+    }
+  },
   async serveOrder(id: string|number) { const res = await api.post(`/waiter/orders/${id}/serve`); return unwrap<ApiEnvelope<Order>>(res); },
   async requestCancel(id: string|number, reason?: string) { const res = await api.post(`/waiter/orders/${id}/request-cancel`, { reason }); return unwrap<ApiEnvelope<Order>>(res); },
   async recordBillPayment(billId: string|number, payload: PaymentPayload) { const res = await api.post(`/cashier/bills/${billId}/payments`, payload); return unwrap<ApiEnvelope<any>>(res); },
   async convertBillToCredit(billId: string|number, payload: ConvertCreditPayload) { const res = await api.post(`/credit/bills/${billId}/convert`, payload); return unwrap<ApiEnvelope<CreditOrder>>(res); },
+
+  async addOrderItem(orderId: string|number, payload: { menu_item_id: Id; quantity: number; notes?: string | null }) { const res = await api.post(`/cashier/orders/${orderId}/items`, payload); return unwrap<ApiEnvelope<Order>>(res); },
+  async updateOrderItem(orderId: string|number, itemId: string|number, payload: { quantity: number; notes?: string | null }) { const res = await api.put(`/cashier/orders/${orderId}/items/${itemId}`, payload); return unwrap<ApiEnvelope<Order>>(res); },
+  async removeOrderItem(orderId: string|number, itemId: string|number) { const res = await api.delete(`/cashier/orders/${orderId}/items/${itemId}`); return unwrap<ApiEnvelope<Order>>(res); },
+  async printOrderBill(orderId: string|number, payload: { customer_name?: string | null; customer_tin?: string | null; payment_method?: PaymentMethod }) { const res = await api.post(`/cashier/orders/${orderId}/print-bill`, payload); return unwrap<ApiEnvelope<Order>>(res); },
+
   async prepTickets(kind: 'kitchen'|'bar', params: OrderFilters = {}) { const res = await api.get(`/${kind}/tickets`, { params: clean(params) }); return page<PrepTicket>(res.data); },
   async prepTicketAction(kind: 'kitchen'|'bar', id: string|number, action: 'accept'|'ready'|'served'|'reject'|'delay') { const res = await api.post(`/${kind}/tickets/${id}/${action}`); return unwrap<ApiEnvelope<PrepTicket>>(res); },
 
@@ -66,6 +78,10 @@ export const orderService = {
   async creditAccounts(params: OrderFilters = {}) { const res = await api.get('/credit/accounts', { params: clean(params) }); return page<CreditAccount>(res.data); },
   async createCreditAccount(payload: CreditAccountPayload) { const res = await api.post('/credit/accounts', payload); return unwrap<ApiEnvelope<CreditAccount>>(res); },
   async updateCreditAccount(id: string|number, payload: CreditAccountPayload) { const res = await api.put(`/credit/accounts/${id}`, payload); return unwrap<ApiEnvelope<CreditAccount>>(res); },
+  async creditAgreements(accountId: string|number) { const res = await api.get(`/credit/accounts/${accountId}/agreements`, { params: { per_page: 100 } }); return page<CreditAgreement>(res.data); },
+  async createCreditAgreement(accountId: string|number, payload: CreditAgreementPayload) { const form = new FormData(); Object.entries(payload as any).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== '') form.append(key, value as any); }); const res = await api.post(`/credit/accounts/${accountId}/agreements`, form, { headers: { 'Content-Type': 'multipart/form-data' } }); return unwrap<ApiEnvelope<CreditAgreement>>(res); },
+  async updateCreditAgreement(accountId: string|number, agreementId: string|number, payload: CreditAgreementPayload) { const form = new FormData(); Object.entries(payload as any).forEach(([key, value]) => { if (value !== undefined && value !== null && value !== '') form.append(key, value as any); }); const res = await api.post(`/credit/accounts/${accountId}/agreements/${agreementId}`, form, { headers: { 'Content-Type': 'multipart/form-data' } }); return unwrap<ApiEnvelope<CreditAgreement>>(res); },
+  async disableCreditAgreement(accountId: string|number, agreementId: string|number) { const res = await api.patch(`/credit/accounts/${accountId}/agreements/${agreementId}/disable`); return unwrap<ApiEnvelope<CreditAgreement>>(res); },
   async toggleCreditAccount(id: string|number) { const res = await api.patch(`/credit/accounts/${id}/toggle`); return unwrap<ApiEnvelope<CreditAccount>>(res); },
   async scanCreditCard(cardNumber: string) { const res = await api.get('/credit/cards/scan', { params: { card_number: cardNumber } }); return unwrap<ApiEnvelope<any>>(res); },
   async creditOrders(params: OrderFilters = {}) { const res = await api.get('/credit/orders', { params: clean(params) }); return page<CreditOrder>(res.data); },

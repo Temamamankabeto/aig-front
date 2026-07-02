@@ -8,12 +8,10 @@ const DEFAULT_VAT_RATE = 0.15;
 const DEFAULT_SERVICE_CHARGE_RATE = 0.07;
 
 const SELLER = {
-  name: "RESTAURANT",
+  name: "AIG",
   address: "Ethiopia",
   tin: "TIN-0000000000",
   vatNo: "VAT-0000000000",
-  posId: "POS-001",
-  fiscalMachineNo: "FM-001",
 };
 
 function money(value: unknown) {
@@ -223,18 +221,26 @@ function sellerHeader(title: string, subtitle: string) {
   `;
 }
 
-function fiscalInfoHtml(order?: PrintableOrder) {
-  return `
-    <div class="section-title">Fiscal Information</div>
-    <div class="meta"><span>POS ID</span><strong>${SELLER.posId}</strong></div>
-    <div class="meta"><span>Fiscal Machine No</span><strong>${SELLER.fiscalMachineNo}</strong></div>
-    <div class="meta"><span>Receipt Serial</span><strong>${billNumber(order)}</strong></div>
-  `;
+function fiscalInfoHtml(_order?: PrintableOrder) {
+  return "";
 }
 
+
 function buyerInfoHtml(order?: PrintableOrder) {
-  const customer = order?.customer?.name ?? order?.customer_name ?? "Walk-in Customer";
-  const tin = order?.customer?.tin ?? order?.customer_tin ?? "—";
+  const creditAccount = order?.credit_account ?? order?.creditAccount ?? order?.credit_order?.credit_account ?? order?.creditOrder?.creditAccount ?? order?.creditOrder?.account;
+  const customer =
+    order?.customer?.name ??
+    order?.customer_name ??
+    creditAccount?.name ??
+    creditAccount?.account_name ??
+    "Walk-in Customer";
+  const tin =
+    order?.customer?.tin ??
+    order?.customer_tin ??
+    order?.tin_number ??
+    creditAccount?.tin_number ??
+    creditAccount?.tin ??
+    "—";
   return `
     <div class="section-title">Buyer Information</div>
     <div class="meta"><span>Customer</span><strong>${customer}</strong></div>
@@ -242,14 +248,27 @@ function buyerInfoHtml(order?: PrintableOrder) {
   `;
 }
 
+function escapeAttr(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function qrPlaceholder(order?: PrintableOrder) {
+  const payload = JSON.stringify({
+    order_no: orderNumber(order),
+    bill_no: billNumber(order),
+    total: billingSummary(order).grandTotal,
+    seller: SELLER.name,
+  });
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(payload)}`;
+
   return `
     <div class="qr-box">
-      <div class="qr-inner">QR</div>
+      <img class="qr-img" src="${escapeAttr(qrUrl)}" alt="QR Code" />
       <div class="muted">${orderNumber(order)}</div>
     </div>
   `;
 }
+
 
 
 function printHtml(title: string, body: string) {
@@ -283,8 +302,8 @@ function printHtml(title: string, body: string) {
           .total { display: flex; justify-content: space-between; gap: 8px; border-top: 1px dashed #9ca3af; margin-top: 10px; padding-top: 10px; font-size: 15px; font-weight: 800; }
           .footer { text-align: center; color: #6b7280; margin-top: 14px; padding-top: 10px; border-top: 1px dashed #9ca3af; font-size: 11px; }
           .unpaid { margin-top: 10px; padding: 7px; border: 1px dashed #ef4444; color: #991b1b; text-align: center; font-weight: 800; font-size: 12px; }
-          .qr-box { margin: 12px auto 0; width: 90px; text-align: center; font-size: 10px; }
-          .qr-inner { width: 72px; height: 72px; margin: 0 auto 4px; border: 2px solid #111827; display:flex; align-items:center; justify-content:center; font-weight:800; }
+          .qr-box { margin: 12px auto 0; width: 120px; text-align: center; font-size: 10px; }
+          .qr-img { width: 110px; height: 110px; margin: 0 auto 4px; display:block; }
           @media print { .no-print { display: none; } }
         </style>
       </head>
@@ -305,8 +324,6 @@ export function printCustomerOrderTicket(order?: PrintableOrder) {
       ${baseInfo(order)}
       <div class="section-title">Ordered Items</div>
       <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Station</th></tr></thead><tbody>${rowsHtml(items, false)}</tbody></table>
-      <div class="section-title">Bill Summary</div>
-      ${financialSummaryHtml(order, false)}
       <div class="unpaid">ORDER TICKET - NOT A PAID RECEIPT</div>
       <div class="footer">Keep this ticket for pickup and billing.</div>
     </div>`,
@@ -322,8 +339,6 @@ export function printKitchenTicket(order?: PrintableOrder) {
       ${baseInfo(order)}
       <div class="section-title">Food Items</div>
       <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Station</th></tr></thead><tbody>${rowsHtml(items, false)}</tbody></table>
-      <div class="section-title">Bill Summary</div>
-      ${financialSummaryHtml(order, false)}
       <div class="footer">Kitchen copy - prepare immediately.</div>
     </div>`,
   );
@@ -338,8 +353,6 @@ export function printBarTicket(order?: PrintableOrder) {
       ${baseInfo(order)}
       <div class="section-title">Drink Items</div>
       <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Station</th></tr></thead><tbody>${rowsHtml(items, false)}</tbody></table>
-      <div class="section-title">Bill Summary</div>
-      ${financialSummaryHtml(order, false)}
       <div class="footer">Bar copy - prepare immediately.</div>
     </div>`,
   );
@@ -359,7 +372,6 @@ export function printOrderBill(order?: PrintableOrder) {
       <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Price</th><th class="right">Total</th></tr></thead><tbody>${rowsHtml(items, true)}</tbody></table>
       <div class="section-title">Charges</div>
       ${financialSummaryHtml(order, true)}
-      ${fiscalInfoHtml(order)}
       ${String(summary.status).toLowerCase() !== "paid" ? `<div class="unpaid">UNPAID BILL - NOT PAID RECEIPT</div>` : ""}
       ${qrPlaceholder(order)}
       <div class="footer">This is a Tax Invoice/Bill format. Final paid receipt is issued after payment.</div>

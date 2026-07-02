@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { Edit, Eye, KeyRound, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Trash2, UserCheck, UserX } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -26,6 +27,28 @@ function roleOf(user: UserItem) {
   return !first ? "—" : typeof first === "string" ? first : first.name;
 }
 
+function firstValidationMessage(error: unknown, fallback: string) {
+  if (typeof error === "object" && error && "issues" in error) {
+    const issues = (error as { issues?: Array<{ message?: string }> }).issues;
+    return issues?.[0]?.message ?? fallback;
+  }
+
+  if (error instanceof Error) return error.message;
+
+  return fallback;
+}
+
+function mutationErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+
+  if (typeof error === "object" && error && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+
+  return fallback;
+}
+
 export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<UserStatus | "all">("all");
@@ -42,11 +65,11 @@ export default function UsersPage() {
   const params = useMemo(() => ({ search, status, page, per_page: 10 }), [search, status, page]);
   const usersQuery = useUsersQuery(params);
   const roles = useUserRolesLiteQuery().data ?? [];
-  const createUser = useCreateUserMutation(() => { setCreateOpen(false); setCreateForm(emptyCreate); });
-  const updateUser = useUpdateUserMutation(() => { setEditOpen(false); setSelectedUser(null); });
+  const createUser = useCreateUserMutation();
+  const updateUser = useUpdateUserMutation();
   const toggleUser = useToggleUserMutation();
   const removeUser = useDeleteUserMutation();
-  const resetPassword = useResetUserPasswordMutation(() => { setResetOpen(false); setSelectedUser(null); setNewPassword(""); });
+  const resetPassword = useResetUserPasswordMutation();
 
   const rows = usersQuery.data?.data ?? [];
   const meta = usersQuery.data?.meta;
@@ -67,19 +90,77 @@ export default function UsersPage() {
 
   function submitCreate(e: FormEvent) {
     e.preventDefault();
-    createUser.mutate(createUserSchema.parse(createForm));
+
+    const parsed = createUserSchema.safeParse(createForm);
+
+    if (!parsed.success) {
+      toast.error(firstValidationMessage(parsed.error, "Please correct the highlighted fields."));
+      return;
+    }
+
+    createUser.mutate(parsed.data, {
+      onSuccess: () => {
+        setCreateOpen(false);
+        setCreateForm(emptyCreate);
+        toast.success("User created successfully.");
+      },
+      onError: (error) => {
+        toast.error(mutationErrorMessage(error, "Failed to create user."));
+      },
+    });
   }
 
   function submitEdit(e: FormEvent) {
     e.preventDefault();
     if (!selectedUser) return;
-    updateUser.mutate({ id: selectedUser.id, payload: updateUserSchema.parse(editForm) });
+
+    const parsed = updateUserSchema.safeParse(editForm);
+
+    if (!parsed.success) {
+      toast.error(firstValidationMessage(parsed.error, "Please correct the highlighted fields."));
+      return;
+    }
+
+    updateUser.mutate(
+      { id: selectedUser.id, payload: parsed.data },
+      {
+        onSuccess: () => {
+          setEditOpen(false);
+          setSelectedUser(null);
+          toast.success("User updated successfully.");
+        },
+        onError: (error) => {
+          toast.error(mutationErrorMessage(error, "Failed to update user."));
+        },
+      }
+    );
   }
 
   function submitReset(e: FormEvent) {
     e.preventDefault();
     if (!selectedUser) return;
-    resetPassword.mutate({ id: selectedUser.id, payload: resetUserPasswordSchema.parse({ new_password: newPassword }) });
+
+    const parsed = resetUserPasswordSchema.safeParse({ new_password: newPassword });
+
+    if (!parsed.success) {
+      toast.error(firstValidationMessage(parsed.error, "Please enter a valid new password."));
+      return;
+    }
+
+    resetPassword.mutate(
+      { id: selectedUser.id, payload: parsed.data },
+      {
+        onSuccess: () => {
+          setResetOpen(false);
+          setSelectedUser(null);
+          setNewPassword("");
+          toast.success("Password reset successfully.");
+        },
+        onError: (error) => {
+          toast.error(mutationErrorMessage(error, "Failed to reset password."));
+        },
+      }
+    );
   }
 
   return (

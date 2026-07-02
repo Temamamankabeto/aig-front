@@ -13,7 +13,7 @@ import { authService } from "@/services/auth/auth.service";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -21,7 +21,7 @@ export default function LoginPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const response = await authService.login({ email, password });
+      const response = await authService.login({ login, password });
       authService.saveSession(response);
       toast.success("Logged in successfully");
       router.replace("/dashboard");
@@ -37,13 +37,21 @@ export default function LoginPage() {
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Sign in</CardTitle>
-          <CardDescription>Login to access your dashboard and user management.</CardDescription>
+          <CardDescription>Login using your email address or phone number.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" />
+              <Label htmlFor="login">Email or Phone Number</Label>
+              <Input
+                id="login"
+                type="text"
+                value={login}
+                onChange={(e) => setLogin(e.target.value)}
+                required
+                autoComplete="username"
+                placeholder="Enter email or phone number"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>

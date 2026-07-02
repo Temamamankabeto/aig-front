@@ -38,6 +38,17 @@ function accountUsers(account?: CreditAccount | null): CreditAccountUser[] {
   return [];
 }
 
+function activeAgreements(account?: CreditAccount | null): any[] {
+  const value = account as any;
+  if (Array.isArray(value?.active_agreements)) return value.active_agreements;
+  if (Array.isArray(value?.activeAgreements)) return value.activeAgreements;
+  if (Array.isArray(value?.agreements)) {
+    const today = new Date().toISOString().slice(0, 10);
+    return value.agreements.filter((agreement: any) => String(agreement.status ?? "active") === "active" && String(agreement.start_date ?? "").slice(0, 10) <= today && String(agreement.end_date ?? "").slice(0, 10) >= today);
+  }
+  return [];
+}
+
 function isActiveAuthorizedUser(user: CreditAccountUser) {
   const raw = (user as any).is_active;
   return raw === undefined || raw === null || raw === true || raw === 1 || raw === "1";
@@ -61,6 +72,7 @@ export function CashierCreditCreateOrderPage() {
     payment_type: "regular",
     credit_account_id: "",
     credit_account_user_id: "",
+    credit_agreement_id: "",
     credit_notes: "",
     notes: "",
   };
@@ -109,9 +121,9 @@ export function CashierCreditCreateOrderPage() {
     });
   }, [isCredit, payload.credit_account_id, payload.credit_account_user_id, authorizedUsers]);
 
-  const creditLimit = Number(selectedCreditAccount?.credit_limit ?? 0);
-  const currentBalance = Number(selectedCreditAccount?.current_balance ?? 0);
-  const remainingLimit = Math.max(0, creditLimit - currentBalance);
+  const selectedActiveAgreements = activeAgreements(selectedCreditAccount);
+  const selectedAgreement = selectedActiveAgreements[0];
+  const hasActiveAgreement = !isCredit || Boolean(selectedAgreement);
   const needsTable = payload.order_type === "dine_in";
 
   const total = useMemo(() => items.reduce((sum, item) => {
@@ -123,7 +135,7 @@ export function CashierCreditCreateOrderPage() {
     items.length > 0 &&
     (!needsTable || Boolean(payload.table_id)) &&
     Boolean(payload.waiter_id) &&
-    (!isCredit || (Boolean(payload.credit_account_id) && (!mustChooseAuthorizedUser || Boolean(payload.credit_account_user_id)) && total <= remainingLimit));
+    (!isCredit || (Boolean(payload.credit_account_id) && hasActiveAgreement && (!mustChooseAuthorizedUser || Boolean(payload.credit_account_user_id))));
 
   function addItem(id: string | number) {
     setItems((current) => {
@@ -152,6 +164,7 @@ export function CashierCreditCreateOrderPage() {
       payment_type: payload.payment_type as any,
       credit_account_id: isCredit ? payload.credit_account_id : null,
       credit_account_user_id: isCredit && payload.credit_account_user_id ? payload.credit_account_user_id : null,
+      credit_agreement_id: isCredit && selectedAgreement?.id ? selectedAgreement.id : null,
       credit_notes: payload.credit_notes,
       notes: payload.notes,
       items,
@@ -162,7 +175,7 @@ export function CashierCreditCreateOrderPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Create POS Order</h1>
-        <p className="text-muted-foreground">Cashier can create dine-in or takeaway orders, select the responsible waiter, and create credit orders directly when a credit account has enough remaining limit.</p>
+        <p className="text-muted-foreground">Cashier can create dine-in or takeaway orders, select the responsible waiter, and create credit orders only when the account has an active agreement.</p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
@@ -225,10 +238,8 @@ export function CashierCreditCreateOrderPage() {
                       <SelectTrigger><SelectValue placeholder="Choose credit account" /></SelectTrigger>
                       <SelectContent>
                         {creditAccounts.map((account) => {
-                          const limit = Number(account.credit_limit ?? 0);
-                          const balance = Number(account.current_balance ?? 0);
-                          const remaining = Math.max(0, limit - balance);
-                          return <SelectItem key={account.id} value={String(account.id)}>{account.name} • Limit {money(limit)} • Remaining {money(remaining)}</SelectItem>;
+                          const activeAgreementCount = activeAgreements(account).length;
+                          return <SelectItem key={account.id} value={String(account.id)}>{account.name} • {account.account_type === "single" ? "Single" : "Bulky"} • {activeAgreementCount ? `${activeAgreementCount} active agreement` : "No active agreement"}</SelectItem>;
                         })}
                       </SelectContent>
                     </Select>
@@ -250,11 +261,10 @@ export function CashierCreditCreateOrderPage() {
                   </div>
 
                   <div className="rounded-xl border p-3 text-sm md:col-span-2">
-                    <div className="flex justify-between"><span>Credit limit</span><strong>{money(creditLimit)}</strong></div>
-                    <div className="flex justify-between"><span>Used balance</span><strong>{money(currentBalance)}</strong></div>
-                    <div className="flex justify-between"><span>Remaining limit</span><strong>{money(remainingLimit)}</strong></div>
+                    <div className="flex justify-between"><span>Active agreement</span><strong>{selectedAgreement?.meal_type ?? "Not available"}</strong></div>
+                    <div className="flex justify-between"><span>Agreement date</span><strong>{selectedAgreement ? `${String(selectedAgreement.start_date).slice(0, 10)} → ${String(selectedAgreement.end_date).slice(0, 10)}` : "—"}</strong></div>
                     <div className="flex justify-between"><span>Current cart total</span><strong>{money(total)}</strong></div>
-                    {total > remainingLimit && <p className="mt-2 text-sm text-destructive">Credit limit exceeded. Select another account or reduce cart items.</p>}
+                    {!selectedAgreement && <p className="mt-2 text-sm text-destructive">Credit order is not allowed because this account has no active agreement.</p>}
                   </div>
                 </>
               )}

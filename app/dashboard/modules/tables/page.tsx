@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +13,7 @@ import { TableFormModal } from "@/components/table-management/table-form-modal";
 import { TableStatusBadge } from "@/components/table-management/table-status-badge";
 import { TransferOrdersModal } from "@/components/table-management/transfer-orders-modal";
 import { TransferWaitersModal } from "@/components/table-management/transfer-waiters-modal";
-import { DiningTable, TableListParams, TableStatus, TableWaiter, useTableSectionsQuery, useTableSummaryQuery, useTablesQuery } from "@/hooks/table-management/table";
+import { DiningTable, TableListParams, TableStatus, TableWaiter, useTableSectionsQuery, useTablesQuery } from "@/hooks/table-management/table";
 
 const statuses: Array<TableStatus | "all"> = ["all", "available", "occupied", "reserved", "cleaning", "out_of_service"];
 
@@ -35,9 +35,6 @@ function tableName(table: DiningTable) {
   return table.table_number ?? table.number ?? table.name ?? `Table #${table.id}`;
 }
 
-function summaryValue(summary: Record<string, any>, key: string) {
-  return Number(summary?.[key] ?? summary?.status_counts?.[key] ?? summary?.by_status?.[key] ?? 0).toLocaleString();
-}
 
 export default function TableManagementPage() {
   const [params, setParams] = useState<TableListParams>({ page: 1, per_page: 10, status: "all", is_active: "all", section: "all", search: "" });
@@ -48,11 +45,9 @@ export default function TableManagementPage() {
   const [bulkAssignOpen, setBulkAssignOpen] = useState(false);
 
   const tablesQuery = useTablesQuery(params, "manager");
-  const summaryQuery = useTableSummaryQuery("manager");
   const sectionsQuery = useTableSectionsQuery("manager");
   const rows = tablesQuery.data?.data ?? [];
   const meta = tablesQuery.data?.meta;
-  const summary = useMemo(() => ({ ...(tablesQuery.data?.summary ?? {}), ...(summaryQuery.data ?? {}) }), [tablesQuery.data?.summary, summaryQuery.data]);
 
   function updateParam(next: Partial<TableListParams>) {
     setParams((current) => ({ ...current, ...next, page: next.page ?? 1 }));
@@ -92,13 +87,6 @@ export default function TableManagementPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Card><CardHeader><CardTitle>Total</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{Number(summary.total_tables ?? summary.total ?? meta?.total ?? rows.length).toLocaleString()}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Available</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{summaryValue(summary, "available")}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Occupied</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{summaryValue(summary, "occupied")}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Reserved</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{summaryValue(summary, "reserved")}</CardContent></Card>
-        <Card><CardHeader><CardTitle>Cleaning</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{summaryValue(summary, "cleaning")}</CardContent></Card>
-      </div>
 
       <Card>
         <CardHeader><CardTitle>Tables</CardTitle></CardHeader>

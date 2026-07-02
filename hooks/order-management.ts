@@ -26,6 +26,10 @@ export function useCreditAccountsQuery(filters: OrderFilters = {}) {
   return useQuery({ queryKey: queryKeys.credit.accounts(filters), queryFn: () => orderService.creditAccounts(filters) });
 }
 
+export function useCreditAgreementsQuery(accountId?: string | number) {
+  return useQuery({ queryKey: ["credit", "agreements", accountId], queryFn: () => orderService.creditAgreements(accountId as string | number), enabled: Boolean(accountId) });
+}
+
 export function useCreditOrdersQuery(filters: OrderFilters = {}) {
   return useQuery({ queryKey: queryKeys.credit.orders(filters), queryFn: () => orderService.creditOrders(filters) });
 }
@@ -80,6 +84,27 @@ export function useConvertBillToCreditMutation() {
   return useMutation({ mutationFn: ({ billId, payload }: any) => orderService.convertBillToCredit(billId, payload), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
 }
 
+
+export function useAddOrderItemMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ orderId, payload }: any) => orderService.addOrderItem(orderId, payload), onSuccess: () => invalidate(qc, queryKeys.orders.root()) });
+}
+
+export function useUpdateOrderItemMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ orderId, itemId, payload }: any) => orderService.updateOrderItem(orderId, itemId, payload), onSuccess: () => invalidate(qc, queryKeys.orders.root()) });
+}
+
+export function useRemoveOrderItemMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ orderId, itemId }: any) => orderService.removeOrderItem(orderId, itemId), onSuccess: () => invalidate(qc, queryKeys.orders.root()) });
+}
+
+export function usePrintOrderBillMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ orderId, payload }: any) => orderService.printOrderBill(orderId, payload), onSuccess: () => { invalidate(qc, queryKeys.orders.root()); invalidate(qc, queryKeys.billing.root()); invalidate(qc, queryKeys.shifts.root()); } });
+}
+
 export function useApproveCreditOrderMutation() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string | number) => orderService.approveCreditOrder(id), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
@@ -103,6 +128,21 @@ export function useUpdateCreditAccountMutation() {
 export function useToggleCreditAccountMutation() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string | number) => orderService.toggleCreditAccount(id), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
+}
+
+export function useCreateCreditAgreementMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ accountId, payload }: any) => orderService.createCreditAgreement(accountId, payload), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
+}
+
+export function useUpdateCreditAgreementMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ accountId, agreementId, payload }: any) => orderService.updateCreditAgreement(accountId, agreementId, payload), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
+}
+
+export function useDisableCreditAgreementMutation() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: ({ accountId, agreementId }: any) => orderService.disableCreditAgreement(accountId, agreementId), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
 }
 
 export function usePrepTicketActionMutation() {
