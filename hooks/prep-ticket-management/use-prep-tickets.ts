@@ -23,7 +23,15 @@ export function usePrepTicketsQuery(kind = "kitchen", filters?: unknown) {
   });
 
   useEffect(() => {
-    const count = Array.isArray(query.data) ? query.data.length : 0;
+    const payload: any = query.data;
+    const rows = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.data?.data)
+          ? payload.data.data
+          : [];
+    const count = rows.length;
 
     if (count > prevCountRef.current) {
       play();

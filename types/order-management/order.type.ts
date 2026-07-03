@@ -203,6 +203,11 @@ export type Order = {
   number_of_person?: number | string | null;
   customer_tin?: string | null;
   bill_printed_at?: string | null;
+  payment_status?: string | null;
+  payment_method?: string | null;
+  paid_at?: string | null;
+  paid_amount?: number | string;
+  change_amount?: number | string;
   subtotal?: number | string;
   tax?: number | string;
   service_charge?: number | string;
@@ -218,7 +223,6 @@ export type Order = {
   can_request_cancel?: boolean;
   item_count?: number;
   bill_status?: string | null;
-  paid_amount?: number | string;
   balance?: number | string;
   created_at?: string;
   updated_at?: string;

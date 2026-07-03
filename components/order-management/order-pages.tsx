@@ -68,6 +68,7 @@ import {
   useUpdateOrderItemMutation,
   useRemoveOrderItemMutation,
   usePrintOrderBillMutation,
+  useReceiveOrderPaymentMutation,
   useRecordBillPaymentMutation,
   useConvertBillToCreditMutation,
 } from "@/hooks/mutations/order-management";
@@ -202,7 +203,7 @@ function normalizeOrderItems(order?: Order) {
 }
 
 function canConfirmOrder(status?: string | null) {
-  return ["pending"].includes(String(status ?? "").toLowerCase());
+  return ["submitted", "pending"].includes(String(status ?? "").toLowerCase());
 }
 
 function canServeOrder(status?: string | null) {
@@ -504,7 +505,7 @@ export function OrdersPage({
                           <StatusBadge status={order.status} />
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={order.bill?.status ?? (order as any).payment_status ?? "issued"} />
+                          <StatusBadge status={(order as any).payment_status ?? order.bill?.status ?? "unpaid"} />
                         </TableCell>
                         <TableCell className="font-medium">
                           {money(order.total ?? order.total_amount)}
@@ -577,60 +578,255 @@ export function OrdersPage({
 export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
   const [filters, setFilters] = useState({
     page: 1,
-    per_page: 50,
-    search: "",
-    status: "all",
-    order_type: "all",
-    payment_status: "all",
+    per_page: 10,
     payment_type: "all",
     period: "today" as Period,
     date_from: "",
     date_to: "",
   });
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
 
   const query = useOrdersQuery(
-    filters,
+    {
+      ...filters,
+      page: 1,
+      per_page: 500,
+      status: "all",
+      order_type: "all",
+      payment_status: "all",
+      search: "",
+    },
     scope === "cashier" ? "cashier" : scope === "waiter" ? "waiter" : "admin",
   );
   const orders = query.data?.data ?? [];
-  const meta = query.data?.meta;
 
-  const rows = useMemo(() => {
-    return orders
-      .flatMap((order: Order) => {
-        const bill = (order as any).bill ?? (order as any).billing ?? null;
-        const paymentStatus = bill?.status ?? (order as any).payment_status ?? "issued";
-        return normalizeOrderItems(order).map((item: any) => {
+  const getOrderPaymentMethod = (order: Order) => {
+    const raw = String(
+      (order as any).payment_type ??
+        (order as any).payment_method ??
+        (order as any).paymentMethod ??
+        "cash",
+    ).toLowerCase();
+    return raw === "credit" ? "credit" : "cash";
+  };
+
+  const getOrderItemsTotal = (order: Order) => {
+    const items = normalizeOrderItems(order);
+    const itemTotal = items.reduce((sum: number, item: any) => {
+      const menu = item.menu_item ?? item.menuItem ?? item.menu ?? {};
+      const qty = Number(item.quantity ?? 0);
+      const unit = Number(item.unit_price ?? item.price ?? menu.price ?? 0);
+      return sum + Number(item.total_price ?? item.line_total ?? qty * unit);
+    }, 0);
+
+    if (items.length > 0 || itemTotal > 0) return itemTotal;
+
+    return Number(
+      (order as any).subtotal ??
+        (order as any).sub_total ??
+        (order as any).items_total ??
+        0,
+    );
+  };
+
+  const getOrderVat = (order: Order) =>
+    Number(
+      (order as any).vat_amount ??
+        (order as any).tax_amount ??
+        (order as any).vat_total ??
+        (order as any).vat ??
+        (order as any).tax ??
+        0,
+    );
+
+  const getOrderServiceCharge = (order: Order) =>
+    Number(
+      (order as any).service_charge_amount ??
+        (order as any).service_charge_total ??
+        (order as any).service_fee ??
+        (order as any).service_charge ??
+        0,
+    );
+
+  const getOrderGrandTotal = (order: Order) => {
+    const itemsTotal = getOrderItemsTotal(order);
+    return Number(
+      (order as any).grand_total ??
+        (order as any).total_amount ??
+        (order as any).payable_amount ??
+        (order as any).net_total ??
+        (order as any).total ??
+        itemsTotal + getOrderVat(order) + getOrderServiceCharge(order),
+    );
+  };
+
+  const buildOrderReport = (order: Order) => {
+    const paymentMethod = getOrderPaymentMethod(order);
+    const orderNumber = String(order.order_number ?? `#${order.id}`);
+    const createdAt = (order as any).created_at ?? (order as any).createdAt;
+    const normalizedItems = normalizeOrderItems(order);
+    const isBeefBasedCredit =
+      paymentMethod === "credit" &&
+      String((order as any).credit_order_mode ?? "").toLowerCase() ===
+        "beef_based";
+
+    const itemRows = normalizedItems.length
+      ? normalizedItems.map((item: any, index: number) => {
           const menu = item.menu_item ?? item.menuItem ?? item.menu ?? {};
+          const rawCategory =
+            menu?.category?.name ??
+            menu?.menu_category?.name ??
+            menu?.menuCategory?.name ??
+            menu?.category_name ??
+            item?.category?.name ??
+            item?.menu_category?.name ??
+            item?.menuCategory?.name ??
+            item?.category_name ??
+            menu?.type ??
+            item?.type ??
+            item?.menu_type ??
+            (paymentMethod === "credit" ? "Credit order" : "Uncategorized");
+          const category = String(rawCategory).replace(/_/g, " ");
+          const itemName =
+            menu.name ??
+            item.name ??
+            item.menu_item_name ??
+            item.menu_item_id ??
+            "Menu item";
           const qty = Number(item.quantity ?? 0);
           const unit = Number(item.unit_price ?? item.price ?? menu.price ?? 0);
+          const total = Number(item.total_price ?? item.line_total ?? qty * unit);
+
           return {
-            key: `${order.id}-${item.id ?? item.menu_item_id ?? menu.id ?? Math.random()}`,
+            key: `${order.id}-${item.id ?? item.menu_item_id ?? menu.id ?? `${itemName}-${index}`}`,
             orderId: order.id,
-            orderNumber: order.order_number ?? `#${order.id}`,
-            orderType: order.order_type ?? "—",
-            paymentStatus,
-            orderStatus: order.status,
-            createdAt: (order as any).created_at ?? (order as any).createdAt,
-            itemName: menu.name ?? item.name ?? item.menu_item_name ?? item.menu_item_id ?? "Menu item",
-            image: imageUrlFromMenu(menu || item),
+            orderNumber,
+            category: String(category),
+            itemName: String(itemName),
             qty,
             unit,
-            total: Number(item.total_price ?? item.line_total ?? qty * unit),
+            total,
+            paymentMethod,
+            createdAt,
           };
-        });
-      })
-      .filter((row) => isInsideCustomDateRange(row.createdAt, filters));
-  }, [orders, filters.period, filters.date_from, filters.date_to]);
+        })
+      : isBeefBasedCredit
+        ? (() => {
+            const qty = Math.max(
+              1,
+              Number(
+                (order as any).number_of_person ??
+                  (order as any).persons ??
+                  (order as any).quantity ??
+                  1,
+              ),
+            );
+            const total = getOrderItemsTotal(order);
+            const mealType = String(
+              (order as any).meal_type ??
+                (order as any).credit_meal_type ??
+                "Beef based credit",
+            ).replace(/_/g, " ");
 
-  const totals = useMemo(
-    () => ({
-      quantity: rows.reduce((sum, row) => sum + row.qty, 0),
-      total: rows.reduce((sum, row) => sum + row.total, 0),
-      paid: rows.filter((row) => String(row.paymentStatus).toLowerCase() === "paid").length,
-      unpaid: rows.filter((row) => String(row.paymentStatus).toLowerCase() !== "paid").length,
-    }),
-    [rows],
+            return [
+              {
+                key: `${order.id}-beef-based-credit`,
+                orderId: order.id,
+                orderNumber,
+                category: "Credit beef based",
+                itemName: mealType,
+                qty,
+                unit: qty > 0 ? total / qty : total,
+                total,
+                paymentMethod,
+                createdAt,
+              },
+            ];
+          })()
+        : [];
+
+    const itemsTotal = getOrderItemsTotal(order);
+    const serviceCharge = getOrderServiceCharge(order);
+    const vat = getOrderVat(order);
+    const grandTotal = getOrderGrandTotal(order);
+
+    return {
+      id: order.id,
+      orderNumber,
+      createdAt,
+      paymentMethod,
+      items: itemRows,
+      itemsTotal,
+      serviceCharge,
+      vat,
+      grandTotal,
+    };
+  };
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order: Order) => {
+      const createdAt = (order as any).created_at ?? (order as any).createdAt;
+      if (!isInsideCustomDateRange(createdAt, filters)) return false;
+
+      const paymentMethod = getOrderPaymentMethod(order);
+      if (
+        filters.payment_type !== "all" &&
+        filters.payment_type !== paymentMethod
+      ) {
+        return false;
+      }
+
+      const creditMode = String((order as any).credit_order_mode ?? "").toLowerCase();
+      return normalizeOrderItems(order).length > 0 ||
+        (paymentMethod === "credit" && creditMode === "beef_based");
+    });
+  }, [
+    orders,
+    filters.period,
+    filters.date_from,
+    filters.date_to,
+    filters.payment_type,
+  ]);
+
+  const orderReports = useMemo(
+    () => filteredOrders.map((order: Order) => buildOrderReport(order)),
+    [filteredOrders],
+  );
+
+  const totals = useMemo(() => {
+    return orderReports.reduce(
+      (summary, order) => {
+        if (order.paymentMethod === "credit") summary.credit += order.grandTotal;
+        else summary.cash += order.grandTotal;
+        summary.totalPrice += order.itemsTotal;
+        summary.serviceCharge += order.serviceCharge;
+        summary.vat += order.vat;
+        summary.grandTotal += order.grandTotal;
+        return summary;
+      },
+      {
+        cash: 0,
+        credit: 0,
+        totalPrice: 0,
+        serviceCharge: 0,
+        vat: 0,
+        grandTotal: 0,
+      },
+    );
+  }, [orderReports]);
+
+  const currentPage = Math.min(
+    filters.page,
+    Math.max(1, Math.ceil(orderReports.length / filters.per_page)),
+  );
+  const lastPage = Math.max(1, Math.ceil(orderReports.length / filters.per_page));
+  const paginatedOrders = useMemo(
+    () =>
+      orderReports.slice(
+        (currentPage - 1) * filters.per_page,
+        currentPage * filters.per_page,
+      ),
+    [orderReports, currentPage, filters.per_page],
   );
 
   const updateFilter = (patch: Partial<typeof filters>) =>
@@ -638,71 +834,23 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Ordered items report</h1>
-          <p className="text-muted-foreground">
-            View sold/ordered menu items by today, week, month, year, or custom date interval.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" asChild>
-            <Link href="/dashboard/order-management/orders">See orders</Link>
-          </Button>
-          <Button asChild>
-            <Link href="/dashboard/order-management/orders/create">
-              <Plus className="mr-2 h-4 w-4" />
-              New order
-            </Link>
-          </Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total item rows</CardDescription>
-            <CardTitle>{rows.length}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total quantity</CardDescription>
-            <CardTitle>{totals.quantity}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Total cost</CardDescription>
-            <CardTitle>{money(totals.total)}</CardTitle>
-          </CardHeader>
-        </Card>
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-2">
-            <CardDescription>Paid / not paid</CardDescription>
-            <CardTitle>{totals.paid} / {totals.unpaid}</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-
       <Card className="rounded-2xl">
         <CardHeader className="space-y-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <CardTitle>Ordered item list</CardTitle>
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                className="pl-9 md:w-72"
-                placeholder="Search order/item/customer"
-                value={filters.search}
-                onChange={(e) => updateFilter({ search: e.target.value })}
-              />
-            </div>
+          <div>
+            <CardTitle>Sold items / sales report</CardTitle>
+            <CardDescription>
+              Filter sold order items by period and payment method.
+            </CardDescription>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
-            <Select value={filters.period} onValueChange={(period: Period) => updateFilter({ period })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
+            <Select
+              value={filters.period}
+              onValueChange={(period: Period) => updateFilter({ period })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="today">Today</SelectItem>
                 <SelectItem value="this_week">This week</SelectItem>
@@ -712,125 +860,236 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
               </SelectContent>
             </Select>
 
-            <Select value={filters.status} onValueChange={(status) => updateFilter({ status })}>
-              <SelectTrigger><SelectValue placeholder="Order status" /></SelectTrigger>
+            <Select
+              value={filters.payment_type}
+              onValueChange={(payment_type) => updateFilter({ payment_type })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Payment method" />
+              </SelectTrigger>
               <SelectContent>
-                {["all", "confirmed", "in_progress", "ready", "served", "completed", "cancel_requested", "cancelled"].map((s) => (
-                  <SelectItem key={s} value={s}>{s.replace(/_/g, " ")}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={filters.order_type} onValueChange={(order_type) => updateFilter({ order_type })}>
-              <SelectTrigger><SelectValue placeholder="Order type" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="dine_in">Dine in</SelectItem>
-                <SelectItem value="takeaway">Takeaway</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={filters.payment_status} onValueChange={(payment_status) => updateFilter({ payment_status })}>
-              <SelectTrigger><SelectValue placeholder="Payment status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All payment status</SelectItem>
-                <SelectItem value="issued">Not paid / issued</SelectItem>
-                <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="credit">Credit pending</SelectItem>
-                <SelectItem value="void">Void</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={filters.payment_type} onValueChange={(payment_type) => updateFilter({ payment_type })}>
-              <SelectTrigger><SelectValue placeholder="Payment filter" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All payment types</SelectItem>
+                <SelectItem value="all">All payment methods</SelectItem>
                 <SelectItem value="cash">Cash</SelectItem>
                 <SelectItem value="credit">Credit</SelectItem>
               </SelectContent>
             </Select>
 
+            <Select
+              value={String(filters.per_page)}
+              onValueChange={(per_page) =>
+                updateFilter({ per_page: Number(per_page) })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Rows per page" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 orders</SelectItem>
+                <SelectItem value="25">25 orders</SelectItem>
+                <SelectItem value="50">50 orders</SelectItem>
+              </SelectContent>
+            </Select>
+
             {filters.period === "custom" && (
               <>
-                <Input type="date" value={filters.date_from} onChange={(e) => updateFilter({ date_from: e.target.value })} />
-                <Input type="date" value={filters.date_to} onChange={(e) => updateFilter({ date_to: e.target.value })} />
+                <Input
+                  type="date"
+                  value={filters.date_from}
+                  onChange={(e) => updateFilter({ date_from: e.target.value })}
+                />
+                <Input
+                  type="date"
+                  value={filters.date_to}
+                  onChange={(e) => updateFilter({ date_to: e.target.value })}
+                />
               </>
             )}
           </div>
         </CardHeader>
 
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="overflow-x-auto rounded-xl border">
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="font-semibold">Cash Sales</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.cash)}</TableCell>
+                  <TableCell className="font-semibold">Credit Sales</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.credit)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-semibold">Total Price</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.totalPrice)}</TableCell>
+                  <TableCell className="font-semibold">Service Charge</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.serviceCharge)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-semibold">VAT</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.vat)}</TableCell>
+                  <TableCell className="font-semibold">Grand / Net Total</TableCell>
+                  <TableCell className="text-right font-medium">{money(totals.grandTotal)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+
           <div className="overflow-x-auto rounded-xl border">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Order number</TableHead>
-                  <TableHead>Item</TableHead>
-                  <TableHead>Payment status</TableHead>
-                  <TableHead>Qty</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Quantity</TableHead>
                   <TableHead>Price</TableHead>
                   <TableHead>Total price</TableHead>
-                  <TableHead>Created</TableHead>
+                  <TableHead>Payment method</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {query.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">Loading ordered items...</TableCell>
+                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                      Loading sold items...
+                    </TableCell>
                   </TableRow>
-                ) : rows.length ? (
-                  rows.map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>
-                        <Link className="font-medium hover:underline" href={`/dashboard/order-management/orders/${row.orderId}`}>
-                          {row.orderNumber}
-                        </Link>
-                        <div className="mt-1"><StatusBadge status={row.orderStatus} /></div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="h-12 w-12 overflow-hidden rounded-lg bg-muted">
-                            {row.image ? (
-                              <img src={row.image} alt={row.itemName} className="h-full w-full object-cover" />
-                            ) : (
-                              <div className="flex h-full items-center justify-center text-[10px] text-muted-foreground">No image</div>
-                            )}
-                          </div>
-                          <span className="font-medium">{row.itemName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell><StatusBadge status={String(row.paymentStatus).toLowerCase() === "paid" ? "paid" : "credit"} /></TableCell>
-                      <TableCell>{row.qty}</TableCell>
-                      <TableCell>{money(row.unit)}</TableCell>
-                      <TableCell className="font-medium">{money(row.total)}</TableCell>
-                      <TableCell>{date(row.createdAt)}</TableCell>
-                    </TableRow>
-                  ))
+                ) : paginatedOrders.length ? (
+                  paginatedOrders.flatMap((order) =>
+                    order.items.map((item, itemIndex) => (
+                      <TableRow key={item.key}>
+                        {itemIndex === 0 && (
+                          <TableCell rowSpan={order.items.length} className="align-top font-semibold">
+                            <button
+                              type="button"
+                              className="text-left font-semibold underline-offset-4 hover:underline"
+                              onClick={() => setSelectedOrder(order)}
+                            >
+                              {order.orderNumber}
+                            </button>
+                          </TableCell>
+                        )}
+                        <TableCell className="align-top capitalize">{item.category}</TableCell>
+                        <TableCell className="align-top font-medium">{item.itemName}</TableCell>
+                        <TableCell className="align-top">{item.qty}</TableCell>
+                        <TableCell className="align-top">{money(item.unit)}</TableCell>
+                        <TableCell className="align-top font-medium">{money(item.total)}</TableCell>
+                        <TableCell className="align-top capitalize">{item.paymentMethod}</TableCell>
+                      </TableRow>
+                    )),
+                  )
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">No ordered items found.</TableCell>
+                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                      No sold items found.
+                    </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
 
-          <div className="mt-4 flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              Page {meta?.current_page ?? 1} of {meta?.last_page ?? 1}
+              Page {currentPage} of {lastPage} · {orderReports.length} orders
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" disabled={(meta?.current_page ?? 1) <= 1} onClick={() => setFilters({ ...filters, page: Math.max(1, filters.page - 1) })}>Previous</Button>
-              <Button variant="outline" disabled={(meta?.current_page ?? 1) >= (meta?.last_page ?? 1)} onClick={() => setFilters({ ...filters, page: filters.page + 1 })}>Next</Button>
+              <Button
+                variant="outline"
+                disabled={currentPage <= 1}
+                onClick={() =>
+                  setFilters((current) => ({
+                    ...current,
+                    page: Math.max(1, current.page - 1),
+                  }))
+                }
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                disabled={currentPage >= lastPage}
+                onClick={() =>
+                  setFilters((current) => ({
+                    ...current,
+                    page: Math.min(lastPage, current.page + 1),
+                  }))
+                }
+              >
+                Next
+              </Button>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={Boolean(selectedOrder)}
+        onOpenChange={(open) => !open && setSelectedOrder(null)}
+      >
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>
+              Order detail {selectedOrder?.orderNumber ? `- ${selectedOrder.orderNumber}` : ""}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              All items, totals, service charge, VAT, and grand total for this order.
+            </p>
+          </DialogHeader>
+
+          <div className="overflow-x-auto rounded-xl border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Items</TableHead>
+                  <TableHead>Quantity</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Total price</TableHead>
+                  <TableHead>Payment method</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {selectedOrder?.items.map((item: any) => (
+                  <TableRow key={item.key}>
+                    <TableCell className="capitalize">{item.category}</TableCell>
+                    <TableCell>{item.itemName}</TableCell>
+                    <TableCell>{item.qty}</TableCell>
+                    <TableCell>{money(item.unit)}</TableCell>
+                    <TableCell className="font-medium">{money(item.total)}</TableCell>
+                    <TableCell className="capitalize">{item.paymentMethod}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border">
+            <Table>
+              <TableBody>
+                <TableRow>
+                  <TableCell className="font-semibold">Order total price</TableCell>
+                  <TableCell className="text-right font-medium">{money(selectedOrder?.itemsTotal)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-semibold">Service charge</TableCell>
+                  <TableCell className="text-right font-medium">{money(selectedOrder?.serviceCharge)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-semibold">VAT</TableCell>
+                  <TableCell className="text-right font-medium">{money(selectedOrder?.vat)}</TableCell>
+                </TableRow>
+                <TableRow>
+                  <TableCell className="font-semibold">Grand / Net total</TableCell>
+                  <TableCell className="text-right font-bold">{money(selectedOrder?.grandTotal)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
-
 export function CreateOrderPage({
   scope = "waiter",
   title = "Create order",
@@ -1342,7 +1601,7 @@ export function OrderDetailPage({
   const addItemMutation = useAddOrderItemMutation();
   const updateItemMutation = useUpdateOrderItemMutation();
   const removeItemMutation = useRemoveOrderItemMutation();
-  const printBillMutation = usePrintOrderBillMutation();
+  const receivePaymentMutation = useReceiveOrderPaymentMutation();
 
   const [itemDialogOpen, setItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<any | null>(null);
@@ -1352,18 +1611,19 @@ export function OrderDetailPage({
     quantity: 1,
     notes: "",
   });
-  const [billDialogOpen, setBillDialogOpen] = useState(false);
-  const [billPayload, setBillPayload] = useState({
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [paymentPayload, setPaymentPayload] = useState({
     customer_name: "Guest",
     customer_tin: "",
     payment_method: "cash",
+    paid_amount: "",
   });
 
   const order = normalizeOrderResponse(query.data);
   const items = normalizeOrderItems(order);
   const status = order?.status;
   const bill = (order as any)?.bill ?? (order as any)?.billing ?? null;
-  const paymentStatus = bill?.status ?? (order as any)?.payment_status ?? "issued";
+  const paymentStatus = (order as any)?.payment_status ?? bill?.status ?? "unpaid";
   const orderType = String(order?.order_type ?? "—").replace(/_/g, " ");
   const orderTotal =
     order?.total ??
@@ -1381,15 +1641,19 @@ export function OrderDetailPage({
       0,
     );
 
-  const billLocked = Boolean(
-    (order as any)?.bill_printed_at ||
-      (order as any)?.bill_locked ||
-      (order as any)?.locked_at ||
-      bill?.printed_at ||
-      bill?.is_printed ||
-      bill?.printed ||
-      ["paid", "credit", "void", "refunded"].includes(String(paymentStatus).toLowerCase()),
+  const paymentLocked = Boolean(
+    (order as any)?.paid_at ||
+      ["paid", "void", "refunded"].includes(String(paymentStatus).toLowerCase()),
   );
+  const isCashierScope = scope === "cashier" || scope === "admin";
+  const isWaiterScope = scope === "waiter";
+  const normalizedOrderStatus = String(status ?? "").toLowerCase();
+  const mustConfirmBeforePrintOrPayment = normalizedOrderStatus === "submitted";
+  const canManageOrderItems = !paymentLocked && (isCashierScope || (isWaiterScope && normalizedOrderStatus === "submitted"));
+  const canCashierPrintTicket = isCashierScope && !paymentLocked && !mustConfirmBeforePrintOrPayment;
+  const canReceiveOrderPayment = isCashierScope && !paymentLocked && !mustConfirmBeforePrintOrPayment;
+  const canCashierConfirmOrder = isCashierScope && canConfirmOrder(status);
+  const canCashierServeOrder = isCashierScope && canServeOrder(status);
 
   const menuQuery = useMenuItemsQuery(
     {
@@ -1416,14 +1680,14 @@ export function OrderDetailPage({
   }
 
   function openAddItemDialog() {
-    if (billLocked) return;
+    if (!canManageOrderItems) return;
     setEditingItem(null);
     setItemPayload({ menu_item_id: "", quantity: 1, notes: "" });
     setItemDialogOpen(true);
   }
 
   function openEditItemDialog(item: any) {
-    if (billLocked) return;
+    if (!canManageOrderItems) return;
     setEditingItem(item);
     setItemPayload({
       menu_item_id: String(item.menu_item_id ?? item.menu_item?.id ?? item.menuItem?.id ?? ""),
@@ -1434,7 +1698,7 @@ export function OrderDetailPage({
   }
 
   function submitItemForm() {
-    if (!order?.id || billLocked) return;
+    if (!order?.id || !canManageOrderItems) return;
 
     if (editingItem) {
       const itemId = editingItem.id ?? editingItem.order_item_id;
@@ -1478,7 +1742,7 @@ export function OrderDetailPage({
   }
 
   function removeItem(item: any) {
-    if (!order?.id || billLocked) return;
+    if (!order?.id || !canManageOrderItems) return;
     const itemId = item.id ?? item.order_item_id;
     if (!itemId) return;
     if (!window.confirm("Remove this order item?")) return;
@@ -1488,22 +1752,23 @@ export function OrderDetailPage({
     );
   }
 
-  function handlePrintBill() {
-    if (!order?.id || billLocked) return;
-    printBillMutation.mutate(
+  function handleReceivePayment() {
+    if (!order?.id || !canReceiveOrderPayment) return;
+    receivePaymentMutation.mutate(
       {
         orderId: order.id,
         payload: {
-          customer_name: billPayload.customer_name || "Guest",
-          customer_tin: billPayload.customer_tin || null,
-          payment_method: billPayload.payment_method,
+          customer_name: paymentPayload.customer_name || "Guest",
+          customer_tin: paymentPayload.customer_tin || null,
+          payment_method: paymentPayload.payment_method,
+          paid_amount: paymentPayload.paid_amount ? Number(paymentPayload.paid_amount) : undefined,
         },
       },
       {
         onSuccess: (response: any) => {
-          const printedOrder = normalizeOrderResponse(response) ?? order;
-          printOrderBillDocument(printedOrder as any);
-          setBillDialogOpen(false);
+          const paidOrder = normalizeOrderResponse(response) ?? order;
+          printOrderBillDocument(paidOrder as any);
+          setPaymentDialogOpen(false);
           query.refetch();
         },
       },
@@ -1518,11 +1783,15 @@ export function OrderDetailPage({
             Order {order?.order_number ?? id}
           </h1>
           <p className="text-muted-foreground">
-            Print order ticket, print bill, and manage items before the bill is printed.
+            {isWaiterScope
+              ? "Submitted orders are confirmed and paid by the cashier. Waiter can update items only before confirmation."
+              : "Print order ticket and receive payment directly from the order. No separate bill record is required."}
           </p>
         </div>
         <Button variant="outline" asChild>
-          <Link href="/dashboard/order-management/pos/orders">Back to POS orders</Link>
+          <Link href={isWaiterScope ? "/dashboard/order-management/orders" : "/dashboard/order-management/pos/orders"}>
+            {isWaiterScope ? "Back to my orders" : "Back to POS orders"}
+          </Link>
         </Button>
       </div>
 
@@ -1550,30 +1819,36 @@ export function OrderDetailPage({
                 <div>
                   <CardTitle>Items</CardTitle>
                   <CardDescription>
-                    {billLocked
-                      ? "Bill is printed or locked. Items are read-only and no actions are available."
-                      : "Add, edit, or remove items before printing the bill."}
+                    {paymentLocked
+                      ? "Payment is finalized. Items are read-only and no actions are available."
+                      : "Add, edit, or remove items before payment is finalized."}
                   </CardDescription>
                 </div>
 
-                {!billLocked && (
+                {(canManageOrderItems || canCashierPrintTicket || canReceiveOrderPayment || canCashierConfirmOrder || canCashierServeOrder) && (
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => printCustomerOrderTicket(order as any)}>
-                      Print order ticket
-                    </Button>
-                    <Button size="sm" onClick={() => setBillDialogOpen(true)}>
-                      Print bill
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={openAddItemDialog}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Add more item
-                    </Button>
-                    {canConfirmOrder(status) && (
+                    {canCashierPrintTicket && (
+                      <Button size="sm" variant="outline" onClick={() => printCustomerOrderTicket(order as any)}>
+                        Print order ticket
+                      </Button>
+                    )}
+                    {canReceiveOrderPayment && (
+                      <Button size="sm" onClick={() => setPaymentDialogOpen(true)}>
+                        Receive payment
+                      </Button>
+                    )}
+                    {canManageOrderItems && (
+                      <Button size="sm" variant="outline" onClick={openAddItemDialog}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add more item
+                      </Button>
+                    )}
+                    {canCashierConfirmOrder && (
                       <Button size="sm" variant="outline" disabled={confirm.isPending} onClick={() => confirm.mutate(order.id)}>
                         Confirm
                       </Button>
                     )}
-                    {canServeOrder(status) && (
+                    {canCashierServeOrder && (
                       <Button size="sm" variant="outline" disabled={serve.isPending} onClick={() => serve.mutate(order.id)}>
                         Mark served
                       </Button>
@@ -1613,7 +1888,7 @@ export function OrderDetailPage({
                       <TableHead>Unit price</TableHead>
                       <TableHead>Item status</TableHead>
                       <TableHead>Total</TableHead>
-                      {!billLocked && <TableHead className="text-right">Actions</TableHead>}
+                      {canManageOrderItems && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1638,7 +1913,7 @@ export function OrderDetailPage({
                             <TableCell>{money(item.unit_price ?? item.price)}</TableCell>
                             <TableCell><StatusBadge status={item.item_status ?? item.status} /></TableCell>
                             <TableCell className="font-medium">{money(total)}</TableCell>
-                            {!billLocked && (
+                            {canManageOrderItems && (
                               <TableCell className="text-right">
                                 <div className="flex justify-end gap-2">
                                   <Button size="sm" variant="outline" onClick={() => openEditItemDialog(item)}>
@@ -1655,7 +1930,7 @@ export function OrderDetailPage({
                       })
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={billLocked ? 7 : 8} className="h-24 text-center text-muted-foreground">
+                        <TableCell colSpan={canManageOrderItems ? 8 : 7} className="h-24 text-center text-muted-foreground">
                           No items found for this order.
                         </TableCell>
                       </TableRow>
@@ -1718,7 +1993,7 @@ export function OrderDetailPage({
                   <Button variant="outline" onClick={() => setItemDialogOpen(false)}>Cancel</Button>
                   <Button
                     disabled={
-                      billLocked ||
+                      !canManageOrderItems ||
                       (!editingItem && !itemPayload.menu_item_id) ||
                       itemPayload.quantity <= 0 ||
                       addItemMutation.isPending ||
@@ -1733,23 +2008,23 @@ export function OrderDetailPage({
             </DialogContent>
           </Dialog>
 
-          <Dialog open={billDialogOpen} onOpenChange={setBillDialogOpen}>
+          <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Print bill</DialogTitle>
+                <DialogTitle>Receive payment by order</DialogTitle>
               </DialogHeader>
               <div className="grid gap-4">
                 <div className="grid gap-2">
                   <Label>Customer name</Label>
-                  <Input value={billPayload.customer_name} onChange={(event) => setBillPayload({ ...billPayload, customer_name: event.target.value })} placeholder="Guest" />
+                  <Input value={paymentPayload.customer_name} onChange={(event) => setPaymentPayload({ ...paymentPayload, customer_name: event.target.value })} placeholder="Guest" />
                 </div>
                 <div className="grid gap-2">
                   <Label>TIN number optional</Label>
-                  <Input value={billPayload.customer_tin} onChange={(event) => setBillPayload({ ...billPayload, customer_tin: event.target.value })} placeholder="Optional customer TIN" />
+                  <Input value={paymentPayload.customer_tin} onChange={(event) => setPaymentPayload({ ...paymentPayload, customer_tin: event.target.value })} placeholder="Optional customer TIN" />
                 </div>
                 <div className="grid gap-2">
                   <Label>Payment method</Label>
-                  <Select value={billPayload.payment_method} onValueChange={(payment_method) => setBillPayload({ ...billPayload, payment_method })}>
+                  <Select value={paymentPayload.payment_method} onValueChange={(payment_method) => setPaymentPayload({ ...paymentPayload, payment_method })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="cash">Cash</SelectItem>
@@ -1759,10 +2034,22 @@ export function OrderDetailPage({
                     </SelectContent>
                   </Select>
                 </div>
+                {String(order?.payment_type ?? "cash") !== "credit" && (
+                  <div className="grid gap-2">
+                    <Label>Paid amount</Label>
+                    <Input
+                      type="number"
+                      min={Number(orderTotal) || 0}
+                      value={paymentPayload.paid_amount}
+                      onChange={(event) => setPaymentPayload({ ...paymentPayload, paid_amount: event.target.value })}
+                      placeholder={String(orderTotal ?? 0)}
+                    />
+                  </div>
+                )}
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" onClick={() => setBillDialogOpen(false)}>Cancel</Button>
-                  <Button disabled={printBillMutation.isPending || billLocked} onClick={handlePrintBill}>
-                    {printBillMutation.isPending ? "Printing..." : "Print bill"}
+                  <Button variant="outline" onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
+                  <Button disabled={receivePaymentMutation.isPending || !canReceiveOrderPayment} onClick={handleReceivePayment}>
+                    {receivePaymentMutation.isPending ? "Processing..." : "Receive payment"}
                   </Button>
                 </div>
               </div>

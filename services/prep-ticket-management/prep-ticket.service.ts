@@ -23,7 +23,10 @@ export const prepTicketService = {
       params: clean(filters),
     });
 
-    return res.data?.data ?? res.data;
+    // Keep the full API envelope so pages can use rows, pagination meta,
+    // and status summaries. Some existing endpoints return { data: [...] }
+    // while others return a Laravel paginator; the page normalizes both.
+    return res.data;
   },
 
   updateStatus: async (id: number | string, status: string) => {

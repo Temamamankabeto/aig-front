@@ -69,7 +69,8 @@ export const orderService = {
   async addOrderItem(orderId: string|number, payload: { menu_item_id: Id; quantity: number; notes?: string | null }) { const res = await api.post(`/cashier/orders/${orderId}/items`, payload); return unwrap<ApiEnvelope<Order>>(res); },
   async updateOrderItem(orderId: string|number, itemId: string|number, payload: { quantity: number; notes?: string | null }) { const res = await api.put(`/cashier/orders/${orderId}/items/${itemId}`, payload); return unwrap<ApiEnvelope<Order>>(res); },
   async removeOrderItem(orderId: string|number, itemId: string|number) { const res = await api.delete(`/cashier/orders/${orderId}/items/${itemId}`); return unwrap<ApiEnvelope<Order>>(res); },
-  async printOrderBill(orderId: string|number, payload: { customer_name?: string | null; customer_tin?: string | null; payment_method?: PaymentMethod }) { const res = await api.post(`/cashier/orders/${orderId}/print-bill`, payload); return unwrap<ApiEnvelope<Order>>(res); },
+  async receiveOrderPayment(orderId: string|number, payload: { customer_name?: string | null; customer_tin?: string | null; payment_method?: PaymentMethod; paid_amount?: number }) { const res = await api.post(`/cashier/orders/${orderId}/receive-payment`, payload); return unwrap<ApiEnvelope<Order>>(res); },
+  async printOrderBill(orderId: string|number, payload: { customer_name?: string | null; customer_tin?: string | null; payment_method?: PaymentMethod; paid_amount?: number }) { return this.receiveOrderPayment(orderId, payload); },
 
   async prepTickets(kind: 'kitchen'|'bar', params: OrderFilters = {}) { const res = await api.get(`/${kind}/tickets`, { params: clean(params) }); return page<PrepTicket>(res.data); },
   async prepTicketAction(kind: 'kitchen'|'bar', id: string|number, action: 'accept'|'ready'|'served'|'reject'|'delay') { const res = await api.post(`/${kind}/tickets/${id}/${action}`); return unwrap<ApiEnvelope<PrepTicket>>(res); },
