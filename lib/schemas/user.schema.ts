@@ -1,31 +1,44 @@
 import { z } from "zod";
+import type {
+  CreateUserPayload,
+  UpdateUserPayload,
+  ResetUserPasswordPayload,
+  AssignUserRolePayload,
+} from "@/types/user-management/user.type";
 
 export const userStatusSchema = z.enum(["active", "disabled"]);
 
+/**
+ * CREATE USER
+ */
 export const createUserSchema = z.object({
   name: z.string().min(2, "Name is required").max(100),
   email: z.string().email("Valid email is required").max(100),
   phone: z.string().min(3, "Phone is required").max(20),
   password: z.string().min(6, "Password must be at least 6 characters").max(255),
   role: z.string().min(1, "Role is required"),
-});
+}).strict() as z.ZodType<CreateUserPayload, z.ZodTypeDef, CreateUserPayload>;
 
+/**
+ * UPDATE USER
+ */
 export const updateUserSchema = z.object({
   name: z.string().min(2, "Name is required").max(100),
   email: z.string().email("Valid email is required").max(100),
   phone: z.string().min(3, "Phone is required").max(20),
   role: z.string().min(1, "Role is required"),
-});
+}).strict() as z.ZodType<UpdateUserPayload, z.ZodTypeDef, UpdateUserPayload>;
 
+/**
+ * RESET PASSWORD
+ */
 export const resetUserPasswordSchema = z.object({
   new_password: z.string().min(6, "Password must be at least 6 characters").max(255),
-});
+}).strict() as z.ZodType<ResetUserPasswordPayload, z.ZodTypeDef, ResetUserPasswordPayload>;
 
+/**
+ * ASSIGN ROLE
+ */
 export const assignUserRoleSchema = z.object({
   role: z.string().min(1, "Role is required"),
-});
-
-export type CreateUserForm = z.infer<typeof createUserSchema>;
-export type UpdateUserForm = z.infer<typeof updateUserSchema>;
-export type ResetUserPasswordForm = z.infer<typeof resetUserPasswordSchema>;
-export type AssignUserRoleForm = z.infer<typeof assignUserRoleSchema>;
+}).strict() as z.ZodType<AssignUserRolePayload, z.ZodTypeDef, AssignUserRolePayload>;

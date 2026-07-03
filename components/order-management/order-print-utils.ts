@@ -36,7 +36,11 @@ function numberValue(...values: unknown[]) {
 }
 
 function orderItems(order?: PrintableOrder): OrderItem[] {
-  return (order?.items ?? order?.order_items ?? order?.data?.items ?? order?.data?.order_items ?? []) as OrderItem[];
+  return (order?.items ??
+    order?.order_items ??
+    order?.data?.items ??
+    order?.data?.order_items ??
+    []) as OrderItem[];
 }
 
 function menuOf(item: any): OrderMenuItem | Record<string, any> {
@@ -45,7 +49,12 @@ function menuOf(item: any): OrderMenuItem | Record<string, any> {
 
 function itemName(item: any) {
   const menu = menuOf(item);
-  return menu?.name ?? item?.name ?? item?.menu_item_name ?? `Item ${item?.menu_item_id ?? ""}`;
+  return (
+    menu?.name ??
+    item?.name ??
+    item?.menu_item_name ??
+    `Item ${item?.menu_item_id ?? ""}`
+  );
 }
 
 function itemStation(item: any) {
@@ -63,12 +72,18 @@ function orderNumber(order?: PrintableOrder) {
 }
 
 function billNumber(order?: PrintableOrder) {
-  return order?.bill?.bill_number ?? order?.billing?.bill_number ?? `BILL-${orderNumber(order)}`;
+  return (
+    order?.bill?.bill_number ??
+    order?.billing?.bill_number ??
+    `BILL-${orderNumber(order)}`
+  );
 }
 
 function lineTotal(item: any) {
   const qty = Number(item?.quantity ?? 0);
-  const unit = Number(item?.unit_price ?? item?.price ?? menuOf(item)?.price ?? 0);
+  const unit = Number(
+    item?.unit_price ?? item?.price ?? menuOf(item)?.price ?? 0,
+  );
   return Number(item?.line_total ?? item?.total_price ?? qty * unit);
 }
 
@@ -176,7 +191,11 @@ function rowsHtml(items: OrderItem[], includePrice: boolean) {
 }
 
 function baseInfo(order?: PrintableOrder) {
-  const table = order?.table?.table_number ?? order?.table?.name ?? order?.table_number ?? "—";
+  const table =
+    order?.table?.table_number ??
+    order?.table?.name ??
+    order?.table_number ??
+    "—";
   const customer = order?.customer?.name ?? order?.customer_name ?? "Walk-in";
   const cashier = order?.creator?.name ?? order?.cashier?.name ?? "Cashier";
   const type = String(order?.order_type ?? "takeaway").replace(/_/g, " ");
@@ -192,7 +211,7 @@ function baseInfo(order?: PrintableOrder) {
 }
 
 function ratePercent(rate: number) {
-  return Number(rate * 100).toFixed(rate * 100 % 1 === 0 ? 0 : 2);
+  return Number(rate * 100).toFixed((rate * 100) % 1 === 0 ? 0 : 2);
 }
 
 function financialSummaryHtml(order?: PrintableOrder, includePaid = false) {
@@ -225,9 +244,12 @@ function fiscalInfoHtml(_order?: PrintableOrder) {
   return "";
 }
 
-
 function buyerInfoHtml(order?: PrintableOrder) {
-  const creditAccount = order?.credit_account ?? order?.creditAccount ?? order?.credit_order?.credit_account ?? order?.creditOrder?.creditAccount ?? order?.creditOrder?.account;
+ const creditAccount =
+  order?.credit_account ??
+  order?.credit_order?.credit_account ??
+  (order as any)?.creditOrder?.creditAccount ??
+  (order as any)?.creditOrder?.account;
   const customer =
     order?.customer?.name ??
     order?.customer_name ??
@@ -249,7 +271,11 @@ function buyerInfoHtml(order?: PrintableOrder) {
 }
 
 function escapeAttr(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function qrPlaceholder(order?: PrintableOrder) {
@@ -268,8 +294,6 @@ function qrPlaceholder(order?: PrintableOrder) {
     </div>
   `;
 }
-
-
 
 function printHtml(title: string, body: string) {
   const win = window.open("", "_blank", "width=420,height=720");
@@ -331,7 +355,9 @@ export function printCustomerOrderTicket(order?: PrintableOrder) {
 }
 
 export function printKitchenTicket(order?: PrintableOrder) {
-  const items = orderItems(order).filter((item) => itemStation(item) === "kitchen");
+  const items = orderItems(order).filter(
+    (item) => itemStation(item) === "kitchen",
+  );
   printHtml(
     `Kitchen Ticket ${orderNumber(order)}`,
     `<div class="ticket">

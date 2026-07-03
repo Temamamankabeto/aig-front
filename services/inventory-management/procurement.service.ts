@@ -47,6 +47,7 @@ export interface PurchaserDashboardData {
     rejected_requests: number;
   };
 }
+
 export type ProcurementScope =
   | "auto"
   | "admin"
@@ -165,7 +166,6 @@ export type PurchaseOrderStatus =
   | "approved"
   | "partially_received"
   | "completed"
-  | "received"
   | "cancelled";
 
 export interface PurchaseOrderItemRow {
@@ -245,16 +245,15 @@ export interface PaginatedLike<T> {
   };
 }
 
-function cleanParams(params: Record<string, unknown> = {}) {
+export function cleanParams<T extends object>(params: T): Partial<T> {
   return Object.fromEntries(
     Object.entries(params).filter(
       ([, value]) =>
         value !== undefined &&
         value !== null &&
-        value !== "" &&
-        value !== "all",
+        value !== ""
     ),
-  );
+  ) as Partial<T>;
 }
 
 function normalizeRole(value?: string | null) {
@@ -505,3 +504,4 @@ export const procurementService = {
   
   
 };
+

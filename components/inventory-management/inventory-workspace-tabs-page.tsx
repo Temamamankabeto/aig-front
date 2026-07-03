@@ -5,14 +5,25 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { InventoryItemsSiPage } from "@/components/inventory-management/inventory-items-si-page";
-import { InventoryBatchesPage, InventoryMovementsPage, StockActionPage } from "@/components/inventory-management/inventory-pages";
+import {
+  InventoryBatchesPage,
+  InventoryMovementsPage,
+  StockActionPage,
+} from "@/components/inventory-management/inventory-pages";
 import { InventoryReportPage } from "@/components/inventory-management/inventory-pages";
 import { PurchaseValidationConfirmPage } from "@/components/inventory-management/purchase-validation-confirm-page";
 import { PurchaseApprovalTabPage } from "@/components/inventory-management/purchase-approval-tab-page";
-import { PurchaseRequestsPage, OrderedItemsReceivingPage } from "@/components/inventory-management/procurement-pages";
+import {
+  PurchaseRequestsPage,
+  OrderedItemsReceivingPage,
+} from "@/components/inventory-management/procurement-pages";
 import { RecipesTabPage } from "@/components/inventory-management/recipes-tab-page";
 import { LowStockTabPage } from "@/components/inventory-management/low-stock-tab-page";
-import { usePermissions, inventoryPermissions, purchasePermissions } from "@/lib/auth/permissions";
+import {
+  usePermissions,
+  inventoryPermissions,
+  purchasePermissions,
+} from "@/lib/auth/permissions";
 import { procurementService } from "@/services/inventory-management/procurement.service";
 import { authService } from "@/services/auth/auth.service";
 import { normalizeRole } from "@/config/dashboard.config";
@@ -36,7 +47,11 @@ function CountBadge({ value }: { value?: number }) {
   );
 }
 
-export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scope?: Scope }) {
+export function InventoryWorkspaceTabsPage({
+  scope = "food-controller",
+}: {
+  scope?: Scope;
+}) {
   const { can, canAny } = usePermissions();
   const storedUser = authService.getStoredUser();
   const storedRoles = authService.getStoredRoles();
@@ -48,16 +63,35 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
   const isStockKeeper = roleKey === "stock-keeper";
 
   const canSeePurchaseTab =
-    (isManager && canAny([purchasePermissions.ordersApprove, purchasePermissions.requestsApprove, purchasePermissions.ordersRead])) ||
-    (isFbController && canAny([inventoryPermissions.recipeIntegrity, purchasePermissions.ordersRead])) ||
-    (isPurchaser && canAny([purchasePermissions.ordersRead, purchasePermissions.ordersCreate, purchasePermissions.requestsCreate, purchasePermissions.ordersSubmit])) ||
-    (isStockKeeper && canAny([purchasePermissions.ordersReceive, inventoryPermissions.receive]));
+    (isManager &&
+      canAny([
+        purchasePermissions.ordersApprove,
+        purchasePermissions.requestsApprove,
+        purchasePermissions.ordersRead,
+      ])) ||
+    (isFbController &&
+      canAny([
+        inventoryPermissions.recipeIntegrity,
+        purchasePermissions.ordersRead,
+      ])) ||
+    (isPurchaser &&
+      canAny([
+        purchasePermissions.ordersRead,
+        purchasePermissions.ordersCreate,
+        purchasePermissions.requestsCreate,
+        purchasePermissions.ordersSubmit,
+      ])) ||
+    (isStockKeeper &&
+      canAny([
+        purchasePermissions.ordersReceive,
+        inventoryPermissions.receive,
+      ]));
 
   const purchaseTab = isManager
     ? {
         value: "purchase-approval",
         label: "Purchase Approval",
-        status: "food_validated",
+        status: "food_validated" as const,
         scope: "admin" as const,
         content: <PurchaseApprovalTabPage />,
       }
@@ -65,7 +99,7 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
       ? {
           value: "purchase-validation",
           label: "Purchase Validation",
-          status: "submitted",
+          status: "submitted" as const,
           scope: "food-controller" as const,
           content: <PurchaseValidationConfirmPage />,
         }
@@ -73,7 +107,7 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
         ? {
             value: "purchase-requests",
             label: "Purchase Requests",
-            status: "submitted",
+            status: "submitted" as const,
             scope: "purchaser" as const,
             content: <PurchaseRequestsPage />,
           }
@@ -81,15 +115,23 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
           ? {
               value: "receive-ordered-items",
               label: "Receive Ordered Items",
-              status: "approved",
+              status: "approved" as const,
               scope: "stock-keeper" as const,
               content: <OrderedItemsReceivingPage />,
             }
           : null;
 
   const purchaseCount = useQuery({
-    queryKey: ["inventory-tabs", purchaseTab?.value ?? "purchase", purchaseTab?.status ?? "none"],
-    queryFn: () => procurementService.purchaseOrders({ status: purchaseTab?.status, per_page: 1 }, purchaseTab?.scope),
+    queryKey: [
+      "inventory-tabs",
+      purchaseTab?.value ?? "purchase",
+      purchaseTab?.status ?? "none",
+    ],
+    queryFn: () =>
+      procurementService.purchaseOrders(
+        { status: purchaseTab?.status, per_page: 1 },
+        purchaseTab?.scope,
+      ),
     enabled: Boolean(canSeePurchaseTab && purchaseTab),
     staleTime: 30000,
     retry: false,
@@ -171,7 +213,9 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
     return (
       <div className="rounded-xl border border-dashed p-8 text-center">
         <p className="font-medium">No inventory access</p>
-        <p className="mt-1 text-sm text-muted-foreground">Your role does not have permission to view this inventory workspace.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Your role does not have permission to view this inventory workspace.
+        </p>
       </div>
     );
   }
@@ -181,7 +225,9 @@ export function InventoryWorkspaceTabsPage({ scope = "food-controller" }: { scop
       <div className="overflow-x-auto pb-1">
         <TabsList className="inline-flex min-w-max">
           {tabs.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>{tab.label}</TabsTrigger>
+            <TabsTrigger key={tab.value} value={tab.value}>
+              {tab.label}
+            </TabsTrigger>
           ))}
         </TabsList>
       </div>

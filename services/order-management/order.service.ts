@@ -51,6 +51,13 @@ export const orderService = {
 
     throw lastError;
   },
+  async cashierSoldItems(params: any = {}) {
+  const res = await api.get('/cashier/sold-items', {
+    params: clean(params),
+  });
+
+  return res.data;
+},
   async createOrder(payload: OrderPayload, scope: 'waiter'|'cashier'|'public'|'admin' = 'waiter') { const res = await api.post(baseEndpoint(scope), payload); return unwrap<ApiEnvelope<Order>>(res); },
   async confirmOrder(id: string|number) {
     try {

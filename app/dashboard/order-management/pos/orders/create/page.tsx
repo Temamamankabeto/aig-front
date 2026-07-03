@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+const [scanText, setScanText] = useState("");
 import Link from "next/link";
 import { ArrowLeft, Plus, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -294,23 +295,43 @@ export default function CashierPosCreateOrderPage() {
       payload.credit_order_mode !== "beef_based" ||
       (Boolean(payload.meal_type) && Number(payload.number_of_person) > 0)) &&
     (isBeefBased || items.length > 0);
+    function parseCreditScan(
+  input: string,
+): { credit_account_id: string; credit_account_user_id: string } | null {
+  if (!input) return null;
 
-  function applyScan() {
-    const parsed = parseCreditScan(scanText);
-    if (!parsed) {
-      toast.error(
-        "Invalid card scan. Expected credit-account:{id};authorized-user:{id}",
-      );
-      return;
-    }
-    setPayload((current) => ({
-      ...current,
-      payment_type: "credit",
-      credit_account_id: parsed.credit_account_id,
-      credit_account_user_id: parsed.credit_account_user_id,
-    }));
-    toast.success("Credit card scanned and selected");
+  // Expected format:
+  // credit-account:123;authorized-user:456
+  const accountMatch = input.match(/credit-account\s*:\s*(\d+)/i);
+  const userMatch = input.match(/authorized-user\s*:\s*(\d+)/i);
+
+  if (!accountMatch || !userMatch) return null;
+
+  return {
+    credit_account_id: accountMatch[1],
+    credit_account_user_id: userMatch[1],
+  };
+}
+
+ function applyScan() {
+  const parsed = parseCreditScan(scanText);
+
+  if (!parsed) {
+    toast.error(
+      "Invalid card scan. Expected credit-account:{id};authorized-user:{id}",
+    );
+    return;
   }
+
+  setPayload((current) => ({
+    ...current,
+    payment_type: "credit",
+    credit_account_id: parsed.credit_account_id,
+    credit_account_user_id: parsed.credit_account_user_id,
+  }));
+
+  toast.success("Credit card scanned and selected");
+}
 
   function addItem(id: string | number) {
     const exists = items.find((i) => String(i.menu_item_id) === String(id));

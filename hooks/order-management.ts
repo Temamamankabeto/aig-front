@@ -110,9 +110,17 @@ export function useApproveCreditOrderMutation() {
   return useMutation({ mutationFn: (id: string | number) => orderService.approveCreditOrder(id), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
 }
 
-export function useSettleCreditOrderMutation() {
+export function useSettleCreditOrderMutation(onSuccess?: () => void) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, payload }: any) => orderService.settleCreditOrder(id, payload), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
+
+  return useMutation({
+    mutationFn: ({ id, payload }: any) =>
+      orderService.settleCreditOrder(id, payload),
+    onSuccess: () => {
+      invalidate(qc, queryKeys.credit.root());
+      onSuccess?.();
+    },
+  });
 }
 
 export function useCreateCreditAccountMutation(onSuccess?: () => void) {
@@ -120,11 +128,18 @@ export function useCreateCreditAccountMutation(onSuccess?: () => void) {
   return useMutation({ mutationFn: (payload: any) => orderService.createCreditAccount(payload), onSuccess: () => { invalidate(qc, queryKeys.credit.root()); onSuccess?.(); } });
 }
 
-export function useUpdateCreditAccountMutation() {
+export function useUpdateCreditAccountMutation(onSuccess?: () => void) {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ id, payload }: any) => orderService.updateCreditAccount(id, payload), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
-}
 
+  return useMutation({
+    mutationFn: ({ id, payload }: any) =>
+      orderService.updateCreditAccount(id, payload),
+    onSuccess: () => {
+      invalidate(qc, queryKeys.credit.root());
+      onSuccess?.();
+    },
+  });
+}
 export function useToggleCreditAccountMutation() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string | number) => orderService.toggleCreditAccount(id), onSuccess: () => invalidate(qc, queryKeys.credit.root()) });
