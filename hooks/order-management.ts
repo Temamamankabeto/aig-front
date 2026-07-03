@@ -100,9 +100,13 @@ export function useRemoveOrderItemMutation() {
   return useMutation({ mutationFn: ({ orderId, itemId }: any) => orderService.removeOrderItem(orderId, itemId), onSuccess: () => invalidate(qc, queryKeys.orders.root()) });
 }
 
-export function usePrintOrderBillMutation() {
+export function useReceiveOrderPaymentMutation() {
   const qc = useQueryClient();
-  return useMutation({ mutationFn: ({ orderId, payload }: any) => orderService.printOrderBill(orderId, payload), onSuccess: () => { invalidate(qc, queryKeys.orders.root()); invalidate(qc, queryKeys.billing.root()); invalidate(qc, queryKeys.shifts.root()); } });
+  return useMutation({ mutationFn: ({ orderId, payload }: any) => orderService.receiveOrderPayment(orderId, payload), onSuccess: () => { invalidate(qc, queryKeys.orders.root()); invalidate(qc, queryKeys.billing.root()); invalidate(qc, queryKeys.shifts.root()); } });
+}
+
+export function usePrintOrderBillMutation() {
+  return useReceiveOrderPaymentMutation();
 }
 
 export function useApproveCreditOrderMutation() {

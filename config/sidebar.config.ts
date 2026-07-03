@@ -117,8 +117,7 @@ export const sidebarConfig: Record<AppRoleKey, RoleSidebar> = {
     CreditCard,
     [
       item("Orders", `${orderBase}/pos/orders`, ShoppingCart),
-      item("X-Report", "/dashboard/modules/cashier/reports/x-report", BarChart3),
-      item("Z-Report", "/dashboard/modules/cashier/reports/z-report", BarChart3),
+      item("Sales", "/dashboard/order-management/orders/sold-items", BarChart3),
     ],
     false,
   ),

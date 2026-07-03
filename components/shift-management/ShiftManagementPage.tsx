@@ -67,65 +67,312 @@ function dateTime(value?: string | null) {
 
 function printShiftReport(report: any, kind: "X" | "Z") {
   const summary = report?.summary ?? {};
-  const paymentRows = Array.isArray(report?.payment_method_breakdown)
-    ? report.payment_method_breakdown
-    : [];
-  const categoryRows = Array.isArray(report?.category_sales)
-    ? report.category_sales
-    : [];
   const itemRows = Array.isArray(report?.item_sales) ? report.item_sales : [];
 
-  const rowsHtml = (rows: any[], cols: string[]) =>
-    rows.length
-      ? rows
-          .map(
-            (row) =>
-              `<tr>${cols
-                .map((col) => `<td>${row?.[col] ?? "-"}</td>`)
-                .join("")}</tr>`,
-          )
-          .join("")
-      : `<tr><td colspan="${cols.length}">No data</td></tr>`;
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "-")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const numberValue = (value: unknown) => {
+    const amount = Number(value ?? 0);
+    return Number.isFinite(amount) ? amount : 0;
+  };
+
+  const normalizePaymentFilter = (value: unknown) =>
+    String(value ?? "cash")
+      .toLowerCase()
+      .includes("credit")
+      ? "credit"
+      : "cash";
+
+  const normalizeCategoryFilter = (value: unknown) => {
+    const text = String(value ?? "food").toLowerCase();
+    return text.includes("drink") ||
+      text.includes("bar") ||
+      text.includes("beverage")
+      ? "drink"
+      : "food";
+  };
+
+  const displayPayment = (value: unknown) =>
+    normalizePaymentFilter(value) === "credit" ? "Credit" : "Cash";
+
+  const displayCategory = (row: any) => {
+    const category = row?.category ?? row?.category_name ?? "Uncategorized";
+    const type = normalizeCategoryFilter(row?.category_type ?? category);
+    return `${category} (${type === "drink" ? "Drink" : "Food"})`;
+  };
+
+  const groupedBreakdownMap = new Map<string, any>();
+
+  itemRows.forEach((row: any, index: number) => {
+    const paymentMethod = normalizePaymentFilter(
+      row?.payment_method ?? row?.payment_type,
+    );
+    const categoryType = normalizeCategoryFilter(
+      row?.category_type ?? row?.category,
+    );
+    const categoryLabel = displayCategory(row);
+    const item = row?.item_name ?? row?.name ?? row?.item ?? "-";
+    const key = [paymentMethod, categoryType, categoryLabel, item].join("::");
+    const existing = groupedBreakdownMap.get(key);
+
+    if (existing) {
+      existing.quantity += numberValue(row?.quantity ?? row?.qty);
+      existing.amount += numberValue(
+        row?.amount ?? row?.line_total ?? row?.total,
+      );
+      return;
+    }
+
+    groupedBreakdownMap.set(key, {
+      key:
+        row?.id ?? row?.order_item_id ?? `${row?.order_id ?? "order"}-${index}`,
+      paymentMethod,
+      paymentLabel: displayPayment(row?.payment_method ?? row?.payment_type),
+      categoryType,
+      categoryLabel,
+      item,
+      quantity: numberValue(row?.quantity ?? row?.qty),
+      amount: numberValue(row?.amount ?? row?.line_total ?? row?.total),
+    });
+  });
+
+  const breakdownRows = Array.from(groupedBreakdownMap.values()).sort(
+    (a, b) => {
+      const paymentCompare = String(a.paymentLabel).localeCompare(
+        String(b.paymentLabel),
+      );
+      if (paymentCompare !== 0) return paymentCompare;
+      const categoryCompare = String(a.categoryLabel).localeCompare(
+        String(b.categoryLabel),
+      );
+      if (categoryCompare !== 0) return categoryCompare;
+      return String(a.item).localeCompare(String(b.item));
+    },
+  );
+
+  const breakdownRowsJson = JSON.stringify(breakdownRows).replace(
+    /<\//g,
+    "<\\/",
+  );
+
+  const cashRowsTotal = breakdownRows
+    .filter((row) => row.paymentMethod === "cash")
+    .reduce((total, row) => total + numberValue(row.amount), 0);
+  const creditRowsTotal = breakdownRows
+    .filter((row) => row.paymentMethod === "credit")
+    .reduce((total, row) => total + numberValue(row.amount), 0);
+
+  const cashSales = numberValue(
+    report?.cash_sales ?? summary.cash_payments ?? cashRowsTotal,
+  );
+  const creditSales = numberValue(
+    report?.credit_sales ?? summary.credit_amount ?? creditRowsTotal,
+  );
+  const openingCash = numberValue(report?.opening_cash);
+  const cashReceived = cashRowsTotal || cashSales;
+  const creditPaymentAmount = creditRowsTotal || creditSales;
+  const totalCash = openingCash + cashReceived;
 
   const html = `
-  <html><head><title>${kind}-Report</title><style>
-    body{font-family:Arial,sans-serif;padding:20px;color:#111}.center{text-align:center}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}.box{border:1px solid #ddd;padding:8px;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #ddd;padding:6px;text-align:left}.right{text-align:right}.section{margin-top:16px}h1,h2,h3{margin:4px 0}@media print{body{padding:0}.no-print{display:none}}
-  </style></head><body>
-    <div class="center"><h1>${kind}-REPORT</h1><p>${kind === "X" ? "Reading report - totals are not reset" : "Closing report - final shift totals"}</p></div>
-    <div class="grid">
-      <div class="box"><strong>Shift Number:</strong> #${report?.id ?? "-"}</div>
-      <div class="box"><strong>Cashier:</strong> ${report?.cashier_name ?? report?.cashier?.name ?? "-"}</div>
-      <div class="box"><strong>Branch:</strong> ${report?.branch ?? "Restaurant"}</div>
-      <div class="box"><strong>Status:</strong> ${report?.final_shift_status ?? report?.status ?? "-"}</div>
-      <div class="box"><strong>Open Time:</strong> ${dateTime(report?.opened_at ?? report?.open_time)}</div>
-      <div class="box"><strong>${kind === "Z" ? "Close Time" : "Current Time"}:</strong> ${dateTime(kind === "Z" ? (report?.closed_at ?? report?.close_time) : report?.current_time)}</div>
-    </div>
-    <div class="section"><h3>Sales Summary</h3><table><tbody>
-      <tr><td>Total Orders</td><td class="right">${report?.total_orders ?? 0}</td></tr>
-      <tr><td>Cash Sales</td><td class="right">${money(report?.cash_sales ?? summary.cash_payments)}</td></tr>
-      <tr><td>Credit Sales</td><td class="right">${money(report?.credit_sales ?? summary.credit_amount)}</td></tr>
-      <tr><td>Card Sales</td><td class="right">${money(report?.card_sales ?? summary.card_payments)}</td></tr>
-      <tr><td>Mobile Money</td><td class="right">${money(report?.mobile_money_sales ?? summary.mobile_payments)}</td></tr>
-      <tr><td>Bank</td><td class="right">${money(report?.bank_sales ?? summary.bank_payments)}</td></tr>
-      <tr><td>VAT</td><td class="right">${money(report?.vat)}</td></tr>
-      <tr><td>Service Charge</td><td class="right">${money(report?.service_charge)}</td></tr>
-      <tr><td>Discounts</td><td class="right">${money(report?.discounts)}</td></tr>
-      <tr><td>Voided Orders</td><td class="right">${report?.voided_orders ?? 0}</td></tr>
-      <tr><td>Refunded Orders</td><td class="right">${report?.refunded_orders ?? 0}</td></tr>
-      <tr><td><strong>Gross Sales</strong></td><td class="right"><strong>${money(report?.gross_sales)}</strong></td></tr>
-      <tr><td><strong>Net Sales</strong></td><td class="right"><strong>${money(report?.net_sales)}</strong></td></tr>
-    </tbody></table></div>
-    <div class="section"><h3>Drawer / Cash Reconciliation</h3><table><tbody>
-      <tr><td>Opening Cash</td><td class="right">${money(report?.opening_cash)}</td></tr>
-      <tr><td>Expected Cash</td><td class="right">${money(report?.expected_cash ?? summary.expected_cash)}</td></tr>
-      <tr><td>Actual Counted Cash</td><td class="right">${money(report?.actual_cash)}</td></tr>
-      <tr><td>Cash Difference</td><td class="right">${money(report?.cash_difference ?? summary.variance)}</td></tr>
-    </tbody></table></div>
-    <div class="section"><h3>Payment Method Breakdown</h3><table><thead><tr><th>Method</th><th>Transactions</th><th>Amount</th></tr></thead><tbody>${rowsHtml(paymentRows, ["method", "transactions", "amount"])}</tbody></table></div>
-    <div class="section"><h3>Category-wise Sales</h3><table><thead><tr><th>Category</th><th>Qty</th><th>Amount</th></tr></thead><tbody>${rowsHtml(categoryRows, ["category", "quantity", "amount"])}</tbody></table></div>
-    <div class="section"><h3>Item-wise Sales</h3><table><thead><tr><th>Item</th><th>Qty</th><th>Amount</th></tr></thead><tbody>${rowsHtml(itemRows, ["item_name", "quantity", "amount"])}</tbody></table></div>
-    <div class="grid section"><div class="box"><strong>Cashier Signature</strong><br/><br/>___________________</div><div class="box"><strong>Manager Signature</strong><br/><br/>___________________</div></div>
-  </body></html>`;
+  <html>
+    <head>
+      <title>${kind}-Report</title>
+      <style>
+        *{box-sizing:border-box}
+        body{font-family:Arial,sans-serif;margin:0;padding:22px;color:#1f1a17;background:#fff7ed}
+        .sheet{max-width:1120px;margin:0 auto;background:#fff;border:1px solid #c9b59a;box-shadow:0 12px 30px rgba(0,0,0,.08)}
+        .report-head{padding:18px 22px;border-bottom:2px solid #9a5a2f;text-align:center;background:#f8efe2}
+        h1,h2,h3{margin:0}.report-head h1{font-size:24px;letter-spacing:3px}.subtitle{margin-top:6px;color:#6b5b4c;font-size:13px}
+        .meta{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid #d8c7af}
+        .meta div{padding:10px 12px;border-right:1px solid #d8c7af;border-bottom:1px solid #eadfce;font-size:12px}.meta div:nth-child(3n){border-right:0}
+        .label{display:block;color:#7a6957;font-size:10px;text-transform:uppercase;letter-spacing:.08em}.value{font-weight:700;margin-top:3px}
+        .section{padding:16px 22px}.section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}.section-title h3{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:#4c2f1f}
+        table{width:100%;border-collapse:collapse;background:#fff;font-size:12px}th,td{border:1px solid #d8c7af;padding:7px 8px;text-align:left;vertical-align:top}th{background:#f1dec7;font-weight:700;color:#3f281b}.right{text-align:right}.center{text-align:center}.muted{color:#7a6957}
+        .total-row td{background:#f8efe2;font-weight:800}.filter-row{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px}.filter-row label{font-size:11px;font-weight:700;color:#4c2f1f;text-transform:uppercase;letter-spacing:.04em}.filter-row select{margin-left:6px;border:1px solid #d8c7af;background:#fff;padding:5px 8px;border-radius:4px}.hidden-row{display:none}.cash-summary{max-width:560px;margin-left:auto}.footer-note{padding:0 22px 18px;color:#7a6957;font-size:11px}.pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;font-size:12px}.pagination button{border:1px solid #d8c7af;background:#fff;padding:6px 10px;border-radius:6px;font-weight:700}.pagination button:disabled{opacity:.45;cursor:not-allowed}.pagination .pager-actions{display:flex;gap:8px}.totals-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.total-card{border:1px solid #d8c7af;background:#fff;padding:10px 12px}.total-card .amount{font-size:16px;font-weight:800;text-align:right}@media(max-width:900px){.totals-grid{grid-template-columns:repeat(2,1fr)}}
+        @media print{body{background:#fff;padding:0}.sheet{box-shadow:none;border:0;max-width:none}.no-print{display:none}}
+        @media(max-width:760px){body{padding:10px}.meta{grid-template-columns:1fr}.meta div{border-right:0}.section{padding:14px}.report-head{padding:14px}.cash-summary{max-width:none;margin-left:0}}
+      </style>
+    </head>
+    <body>
+      <div class="sheet">
+        <div class="report-head">
+          <h1>${kind}-REPORT</h1>
+          <div class="subtitle">${kind === "X" ? "Current shift reading report - totals are not reset" : "Closed shift final report"}</div>
+        </div>
+
+        <div class="meta">
+          <div><span class="label">Shift Number</span><div class="value">#${escapeHtml(report?.id ?? "-")}</div></div>
+          <div><span class="label">Cashier</span><div class="value">${escapeHtml(report?.cashier_name ?? report?.cashier?.name ?? "-")}</div></div>
+          <div><span class="label">Branch</span><div class="value">${escapeHtml(report?.branch ?? "Restaurant")}</div></div>
+          <div><span class="label">Status</span><div class="value">${escapeHtml(report?.final_shift_status ?? report?.status ?? "-")}</div></div>
+          <div><span class="label">Open Time</span><div class="value">${dateTime(report?.opened_at ?? report?.open_time)}</div></div>
+          <div><span class="label">${kind === "Z" ? "Close Time" : "Current Time"}</span><div class="value">${dateTime(kind === "Z" ? (report?.closed_at ?? report?.close_time) : report?.current_time)}</div></div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">
+            <h3>Sales Breakdown</h3>
+            <span class="muted">Order item sales by payment method and category</span>
+          </div>
+          <div class="filter-row no-print">
+            <label>Payment Method
+              <select id="payment-filter">
+                <option value="all">All</option>
+                <option value="cash">Cash</option>
+                <option value="credit">Credit</option>
+              </select>
+            </label>
+            <label>Category
+              <select id="category-filter">
+                <option value="all">All</option>
+                <option value="food">Food</option>
+                <option value="drink">Drink</option>
+              </select>
+            </label>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Payment Method</th>
+                <th>Categories</th>
+                <th>Items</th>
+                <th class="right">Quantity</th>
+                <th class="right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="sales-breakdown-body"><tr><td colspan="5" class="center muted">Loading sales breakdown...</td></tr></tbody>
+          </table>
+          <div class="pagination no-print">
+            <span id="pagination-info">Showing 0 records</span>
+            <div class="pager-actions">
+              <button type="button" id="prev-page">Previous</button>
+              <button type="button" id="next-page">Next</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title"><h3>Cash / Credit Totals</h3></div>
+          <div class="totals-grid">
+            <div class="total-card"><span class="label">Opening Cash</span><div class="amount">${money(openingCash)}</div></div>
+            <div class="total-card"><span class="label">Cash Received</span><div class="amount">${money(cashReceived)}</div></div>
+            <div class="total-card"><span class="label">Total Cash</span><div class="amount">${money(totalCash)}</div></div>
+            <div class="total-card"><span class="label">Credit Payment Amount</span><div class="amount">${money(creditPaymentAmount)}</div></div>
+          </div>
+        </div>
+
+        <div class="footer-note">Generated from cashier shift orders. ${kind === "X" ? "X-Report does not close or reset the shift." : "Z-Report is generated after shift close."}</div>
+      </div>
+      <script>
+        (function(){
+          var paymentFilter = document.getElementById('payment-filter');
+          var categoryFilter = document.getElementById('category-filter');
+          var prevButton = document.getElementById('prev-page');
+          var nextButton = document.getElementById('next-page');
+          var info = document.getElementById('pagination-info');
+          var page = 1;
+          var perPage = 12;
+          var rowsData = ${breakdownRowsJson};
+          var body = document.getElementById('sales-breakdown-body');
+
+          function formatMoney(value){
+            var amount = Number(value || 0);
+            return Number.isFinite(amount) ? amount.toFixed(2) : '0.00';
+          }
+
+          function safeText(value){
+            return String(value == null ? '-' : value)
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;')
+              .replace(/'/g, '&#039;');
+          }
+
+          function filteredRows(){
+            var payment = paymentFilter ? paymentFilter.value : 'all';
+            var category = categoryFilter ? categoryFilter.value : 'all';
+            return rowsData.filter(function(row){
+              return (payment === 'all' || row.paymentMethod === payment) && (category === 'all' || row.categoryType === category);
+            });
+          }
+
+          function rowSpan(rows, start, keys){
+            var count = 1;
+            for(var i = start + 1; i < rows.length; i += 1){
+              var sameGroup = keys.every(function(key){
+                return rows[i][key] === rows[start][key];
+              });
+              if(!sameGroup){ break; }
+              count += 1;
+            }
+            return count;
+          }
+
+          function renderRows(rows){
+            if(!body){ return; }
+            if(!rows.length){
+              body.innerHTML = '<tr><td colspan="5" class="center muted">No sales breakdown data</td></tr>';
+              return;
+            }
+
+            var html = '';
+            rows.forEach(function(row, index){
+              var paymentCell = '';
+              var categoryCell = '';
+
+              if(index === 0 || rows[index - 1].paymentLabel !== row.paymentLabel){
+                paymentCell = '<td rowspan="' + rowSpan(rows, index, ['paymentLabel']) + '">' + safeText(row.paymentLabel) + '</td>';
+              }
+
+              if(index === 0 || rows[index - 1].paymentLabel !== row.paymentLabel || rows[index - 1].categoryLabel !== row.categoryLabel){
+                categoryCell = '<td rowspan="' + rowSpan(rows, index, ['paymentLabel', 'categoryLabel']) + '">' + safeText(row.categoryLabel) + '</td>';
+              }
+
+              html += '<tr>'
+                + paymentCell
+                + categoryCell
+                + '<td>' + safeText(row.item) + '</td>'
+                + '<td class="right">' + safeText(row.quantity) + '</td>'
+                + '<td class="right">' + formatMoney(row.amount) + '</td>'
+                + '</tr>';
+            });
+
+            body.innerHTML = html;
+          }
+
+          function applyFilters(){
+            var rows = filteredRows();
+            var totalPages = Math.max(1, Math.ceil(rows.length / perPage));
+            if(page > totalPages){ page = totalPages; }
+            var start = (page - 1) * perPage;
+            var end = start + perPage;
+            renderRows(rows.slice(start, end));
+            if(info){
+              info.textContent = rows.length
+                ? 'Showing ' + (start + 1) + '-' + Math.min(end, rows.length) + ' of ' + rows.length + ' grouped order items'
+                : 'Showing 0 grouped order items';
+            }
+            if(prevButton){ prevButton.disabled = page <= 1; }
+            if(nextButton){ nextButton.disabled = page >= totalPages; }
+          }
+
+          function resetAndApply(){ page = 1; applyFilters(); }
+          if(paymentFilter){ paymentFilter.addEventListener('change', resetAndApply); }
+          if(categoryFilter){ categoryFilter.addEventListener('change', resetAndApply); }
+          if(prevButton){ prevButton.addEventListener('click', function(){ if(page > 1){ page -= 1; applyFilters(); } }); }
+          if(nextButton){ nextButton.addEventListener('click', function(){ page += 1; applyFilters(); }); }
+          applyFilters();
+        })();
+      </script>
+    </body>
+  </html>`;
   return html;
 }
 
@@ -422,7 +669,10 @@ export default function ShiftManagementPage({
 }) {
   const [openingCash, setOpeningCash] = useState("0");
   const [closingCash, setClosingCash] = useState("0");
-  const [reportPreview, setReportPreview] = useState<{ title: string; html: string } | null>(null);
+  const [reportPreview, setReportPreview] = useState<{
+    title: string;
+    html: string;
+  } | null>(null);
   const [movementType, setMovementType] =
     useState<ShiftMovementType>("opening_adjustment");
   const [movementAmount, setMovementAmount] = useState("0");
@@ -547,7 +797,10 @@ export default function ShiftManagementPage({
         closing_cash: Number(closingCash),
       });
       const report = await shiftService.zReport(currentShift.id);
-      setReportPreview({ title: "Z-Report", html: printShiftReport(report.data, "Z") ?? "" });
+      setReportPreview({
+        title: "Z-Report",
+        html: printShiftReport(report.data, "Z") ?? "",
+      });
     } catch (error) {
       console.error(error);
     } finally {
@@ -559,7 +812,10 @@ export default function ShiftManagementPage({
     try {
       setReportPrinting("x");
       const report = await shiftService.xReport();
-      setReportPreview({ title: "X-Report", html: printShiftReport(report.data, "X") ?? "" });
+      setReportPreview({
+        title: "X-Report",
+        html: printShiftReport(report.data, "X") ?? "",
+      });
     } catch (error) {
       console.error(error);
       toast.error("Unable to generate X-Report");
@@ -965,21 +1221,41 @@ export default function ShiftManagementPage({
             <CardHeader className="flex flex-row items-start justify-between space-y-0 border-b">
               <div>
                 <CardTitle>{reportPreview.title}</CardTitle>
-                <CardDescription>Excel-format cashier report preview.</CardDescription>
+                <CardDescription>
+                  Excel-format cashier report preview.
+                </CardDescription>
               </div>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => {
-                  const frame = document.getElementById('shift-report-frame') as HTMLIFrameElement | null;
-                  frame?.contentWindow?.focus();
-                  frame?.contentWindow?.print();
-                }}>Print</Button>
-                <Button type="button" variant="ghost" size="icon" onClick={() => setReportPreview(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const frame = document.getElementById(
+                      "shift-report-frame",
+                    ) as HTMLIFrameElement | null;
+                    frame?.contentWindow?.focus();
+                    frame?.contentWindow?.print();
+                  }}
+                >
+                  Print
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setReportPreview(null)}
+                >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="h-[calc(90vh-92px)] p-0">
-              <iframe id="shift-report-frame" title={reportPreview.title} srcDoc={reportPreview.html} className="h-full w-full bg-white" />
+              <iframe
+                id="shift-report-frame"
+                title={reportPreview.title}
+                srcDoc={reportPreview.html}
+                className="h-full w-full bg-white"
+              />
             </CardContent>
           </Card>
         </div>
@@ -1082,7 +1358,8 @@ export default function ShiftManagementPage({
               </div>
 
               <p className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
-                Shift detail only is shown here. Cash Sales Items and Credit Sales Items are removed from the detail popup.
+                Shift detail only is shown here. Cash Sales Items and Credit
+                Sales Items are removed from the detail popup.
               </p>
             </CardContent>
           </Card>
