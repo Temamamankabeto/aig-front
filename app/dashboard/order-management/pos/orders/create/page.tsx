@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-const [scanText, setScanText] = useState("");
 import Link from "next/link";
+import { useMemo, useState } from "react";
+
 import { ArrowLeft, Plus, Printer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -38,14 +40,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
+
+
+import { useCreateOrderMutation } from "@/hooks/mutations/order-management";
 import { useMenuItemsQuery } from "@/hooks/queries/menu-management";
-import { useTablesQuery } from "@/hooks/queries/table-management";
 import {
   useCreditAccountsQuery,
   useWaitersLiteQuery,
 } from "@/hooks/queries/order-management";
-import { useCreateOrderMutation } from "@/hooks/mutations/order-management";
+import { useTablesQuery } from "@/hooks/queries/table-management";
+
 import type {
   CreditAgreement,
   Order,
@@ -194,6 +198,8 @@ function buildPrintableOrderFromSelection({
 }
 
 export default function CashierPosCreateOrderPage() {
+   const [scanText, setScanText] = useState("");
+
   const [menuSearch, setMenuSearch] = useState("");
   const [payload, setPayload] = useState({
     table_id: "",

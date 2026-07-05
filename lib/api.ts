@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from "axios";
 
-const API_BASE_URL = "/api";
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL;
 const TOKEN_KEY = "token";
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {
