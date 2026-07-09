@@ -85,7 +85,7 @@ export default function LoginPage() {
             </div>
             <h2 className="text-2xl font-semibold tracking-tight text-foreground">Welcome back</h2>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Sign in with your email or phone number to continue.
+              Sign in with your email or phone number to continue.temam
             </p>
           </div>
 
