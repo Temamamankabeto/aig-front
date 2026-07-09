@@ -18,27 +18,25 @@ jobs:
       - name: 🔧 Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24.18.0"
+          node-version: "24"
 
       - name: 🔨 Install dependencies and build project
         env:
-          SMS_BASE_URL: ${{ secrets.SMS_BASE_URL}}
-          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY}}
+          SMS_BASE_URL: ${{ secrets.SMS_BASE_URL }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
-        #   SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        #   SUPABASE_API_KEY: ${{ secrets.SUPABASE_API_KEY }}
-        #   SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          # Replace newlines in the private key for usage
-          # echo "${FIREBASE_PRIVATE_KEY}" | tr '\n' '\\n' > key.json
-          npm install
+          npm ci
           npm run build
+          cp -r public .next/standalone/public
+          cp -r .next/static .next/standalone/.next/static
 
-      - name: 📂 Sync files
-        uses: SamKirkland/FTP-Deploy-Action@4.2.0
+      - name: 📂 Sync standalone app
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          dangerous-clean-slate: true
-
+          local-dir: ./.next/standalone/
+          server-dir: ./
+          dangerous-clean-slate: false

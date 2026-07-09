@@ -7,6 +7,12 @@ const backendBaseUrl = (
 ).replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+
+  images: {
+    unoptimized: true,
+  },
+
   async redirects() {
     return [
       {
@@ -76,6 +82,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
   async rewrites() {
     return [
       {
