@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const backendBaseUrl = (
   process.env.NEXT_PUBLIC_BACKEND_URL ||
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ||
-  "http://localhost:8000"
+  "https://api.aigcafe.com"
 ).replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
