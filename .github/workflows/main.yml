@@ -1,8 +1,8 @@
-name: 🚀 Deploy website  push
+name: 🚀 Deploy website on push
 
 on:
   push:
-
+    branches:
       - master
       - main
 
@@ -18,7 +18,7 @@ jobs:
       - name: 🔧 Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.15.1"
+          node-version: "24.18.0"
 
       - name: 🔨 Install dependencies and build project
         env:
@@ -34,30 +34,10 @@ jobs:
           npm install
           npm run build
 
-      - name: � Validate deployment credentials
-        id: ftp-check
-        env:
-          FTP_SERVER: ${{ vars.FTP_SERVER || secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ vars.FTP_USERNAME || secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ vars.FTP_PASSWORD || secrets.FTP_PASSWORD }}
-        run: |
-          if [ -z "$FTP_SERVER" ] || [ -z "$FTP_USERNAME" ] || [ -z "$FTP_PASSWORD" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::FTP deployment skipped because one or more deployment credentials are missing."
-            echo "Add FTP_SERVER, FTP_USERNAME, and FTP_PASSWORD as GitHub repository secrets or variables."
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: 📂 Sync files
-        if: steps.ftp-check.outputs.ready == 'true'
         uses: SamKirkland/FTP-Deploy-Action@4.2.0
-        env:
-          FTP_SERVER: ${{ vars.FTP_SERVER || secrets.FTP_SERVER }}
-          FTP_USERNAME: ${{ vars.FTP_USERNAME || secrets.FTP_USERNAME }}
-          FTP_PASSWORD: ${{ vars.FTP_PASSWORD || secrets.FTP_PASSWORD }}
         with:
-          server: ${{ env.FTP_SERVER }}
-          username: ${{ env.FTP_USERNAME }}
-          password: ${{ env.FTP_PASSWORD }}
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
           dangerous-clean-slate: true
