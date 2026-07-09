@@ -1,7 +1,14 @@
 import axios, { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from "axios";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL;
+const rawApiUrl =
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "http://localhost:8000/api";
+
+const API_BASE_URL = rawApiUrl.replace(/\/+$/, "").endsWith("/api")
+  ? rawApiUrl.replace(/\/+$/, "")
+  : `${rawApiUrl.replace(/\/+$/, "")}/api`;
+
 const TOKEN_KEY = "token";
 
 type RetriableRequestConfig = InternalAxiosRequestConfig & {

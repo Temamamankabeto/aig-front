@@ -1,5 +1,11 @@
 import type { NextConfig } from "next";
 
+const backendBaseUrl = (
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/?$/, "") ||
+  "http://localhost:8000"
+).replace(/\/+$/, "");
+
 const nextConfig: NextConfig = {
   async redirects() {
     return [
@@ -74,7 +80,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/:path*",
-        destination: `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/:path*`,
+        destination: `${backendBaseUrl}/api/:path*`,
       },
     ];
   },
