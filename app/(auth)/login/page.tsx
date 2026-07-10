@@ -83,7 +83,7 @@ export default function LoginPage() {
             <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 lg:hidden">
               <UtensilsCrossed className="h-6 w-6 text-primary" strokeWidth={1.75} />
             </div>
-            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Welcome to aig</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Welcome</h2>
             <p className="mt-1.5 text-sm text-muted-foreground">
               Sign in with your email or phone number to continue
             </p>
