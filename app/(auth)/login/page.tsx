@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Lock, User } from "lucide-react";
 import { toast } from "sonner";
-import { authService } from "@/services/auth/auth.service";
+import { authService } from "../../../services/auth/auth.service";
 
 export default function LoginPage() {
   const router = useRouter();
