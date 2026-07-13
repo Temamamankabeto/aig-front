@@ -18,57 +18,34 @@ jobs:
       - name: 🔧 Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
-          cache: npm
+          node-version: "24"
 
-      - name: 🔨 Build production standalone application
+      - name: 🔨 Install dependencies and build project
         env:
-          NODE_ENV: production
           SMS_BASE_URL: ${{ secrets.SMS_BASE_URL }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          NEXT_PUBLIC_BACKEND_URL: ${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
-          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
-          NEXT_PUBLIC_API_TIMEOUT: "15000"
+          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
         run: |
-          set -e
-
-          # Local development values must never override production secrets.
-          rm -f .env.local
-
           npm ci
           npm run build
 
-          test -f .next/standalone/server.js
-          test -d .next/static
+          mkdir -p .next/standalone/.next
+          cp -r .next/static .next/standalone/.next/static
 
-          rm -rf deploy
-          mkdir -p deploy
-
-          # Copy all standalone files, including hidden directories.
-          cp -a .next/standalone/. deploy/
-
-          # Next standalone does not copy static assets automatically.
-          mkdir -p deploy/.next
-          cp -a .next/static deploy/.next/static
-
-          # Copy public assets only when the project contains them.
-          if [ -d public ]; then
-            cp -a public deploy/public
+          if [ -d "public" ]; then
+              cp -r public .next/standalone/public
           fi
 
-          # Passenger/cPanel-safe startup wrapper.
-          cp app.js deploy/app.js
-
-          test -f deploy/app.js
-          test -f deploy/server.js
-          test -d deploy/.next/static
-
-      - name: 📂 Sync standalone application
+      - name: 📂 Sync standalone app
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./deploy/
+          local-dir: ./.next/standalone/
           server-dir: ./
           dangerous-clean-slate: false
+
+          
+
+

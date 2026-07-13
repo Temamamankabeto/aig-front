@@ -6,12 +6,12 @@ import { useRouter } from "next/navigation";
 import { Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { Button } from "../../../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
-import { Input } from "../../../components/ui/input";
-import { Label } from "../../../components/ui/label";
-import { customerRegisterSchema } from "../../../lib/auth/auth.schema";
-import { authService } from "../../../services/auth/auth.service";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { customerRegisterSchema } from "@/lib/auth/auth.schema";
+import { authService } from "@/services/auth/auth.service";
 
 const initialForm = { name: "", email: "", phone: "", address: "", password: "", password_confirmation: "" };
 type RegisterForm = typeof initialForm;
