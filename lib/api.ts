@@ -3,7 +3,7 @@ import axios, { AxiosError, AxiosHeaders, InternalAxiosRequestConfig } from "axi
 const rawApiUrl =
   process.env.NEXT_PUBLIC_API_URL ||
   process.env.NEXT_PUBLIC_BACKEND_URL ||
-  "http://localhost:8000/api";
+  "https://api.aigcafe.com/api";
 
 const API_BASE_URL = rawApiUrl.replace(/\/+$/, "").endsWith("/api")
   ? rawApiUrl.replace(/\/+$/, "")
