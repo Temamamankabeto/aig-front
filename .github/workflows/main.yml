@@ -18,7 +18,7 @@ jobs:
       - name: 🔧 Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "24"
+          node-version: "24.16.0"
 
       - name: 🔨 Build production standalone application
         env:
@@ -53,4 +53,4 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./.next/standalone/
           server-dir: ./
-          dangerous-clean-slate: false
+          dangerous-clean-slate: true
