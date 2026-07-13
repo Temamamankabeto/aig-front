@@ -24,7 +24,9 @@ jobs:
         env:
           SMS_BASE_URL: ${{ secrets.SMS_BASE_URL }}
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_BACKEND_URL: ${{ secrets.NEXT_PUBLIC_BACKEND_URL }}
+          NEXT_PUBLIC_API_URL: ${{ secrets.NEXT_PUBLIC_API_URL }}
+          NEXT_PUBLIC_API_TIMEOUT: "15000"
         run: |
           npm ci
           npm run build
@@ -33,7 +35,7 @@ jobs:
           cp -r .next/static .next/standalone/.next/static
 
           if [ -d "public" ]; then
-              cp -r public .next/standalone/public
+            cp -r public .next/standalone/public
           fi
 
       - name: 📂 Sync standalone app
@@ -45,7 +47,3 @@ jobs:
           local-dir: ./.next/standalone/
           server-dir: ./
           dangerous-clean-slate: false
-
-          
-
-
