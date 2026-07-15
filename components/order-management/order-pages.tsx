@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { MoreHorizontal, Plus, Search, ShoppingCart } from "lucide-react";
+import { MoreHorizontal, Plus, Printer, Search, ShoppingCart } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +42,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { printCustomerOrderTicket, printOrderBill as printOrderBillDocument } from "@/components/order-management/order-print-utils";
+import { printOrderBill as printOrderBillDocument } from "@/components/order-management/order-print-utils";
+import { OrderTicketPreviewDialog } from "@/components/order-management/order-ticket-preview-dialog";
 import { useMenuItemsQuery } from "@/hooks/queries/menu-management";
 import { useTablesQuery } from "@/hooks/queries/table-management";
 import {
@@ -271,6 +272,102 @@ export function OrdersPage({
 
   const updateFilter = (patch: Partial<typeof filters>) =>
     setFilters((current) => ({ ...current, ...patch, page: 1 }));
+
+  const printFilteredReport = () => {
+    const escapeHtml = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+    const rows = orderReports
+      .flatMap((order) =>
+        order.items.map((item, itemIndex) => `
+          <tr>
+            ${
+              itemIndex === 0
+                ? `<td rowspan="${order.items.length}">${escapeHtml(order.orderNumber)}</td>
+                   <td rowspan="${order.items.length}">${escapeHtml(order.waiterName)}</td>`
+                : ""
+            }
+            <td>${escapeHtml(item.category)}</td>
+            <td>${escapeHtml(item.itemName)}</td>
+            <td class="number">${escapeHtml(item.qty)}</td>
+            <td class="number">${escapeHtml(money(item.unit))}</td>
+            <td class="number">${escapeHtml(money(item.total))}</td>
+            <td>${escapeHtml(item.paymentMethod)}</td>
+          </tr>`,
+        ),
+      )
+      .join("");
+
+    const periodLabel =
+      filters.period === "custom"
+        ? `${filters.date_from || "Beginning"} to ${filters.date_to || "Today"}`
+        : filters.period.replace(/_/g, " ");
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Filtered Sold Items Report</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color: #111827; margin: 0; font-size: 11px; }
+    h1 { margin: 0 0 4px; font-size: 20px; text-align: center; }
+    .subtitle { text-align: center; margin-bottom: 14px; color: #4b5563; text-transform: capitalize; }
+    .summary { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+    .summary td { border: 1px solid #d1d5db; padding: 7px 9px; }
+    .summary .label { font-weight: 700; background: #f3f4f6; }
+    table.report { width: 100%; border-collapse: collapse; }
+    .report th, .report td { border: 1px solid #9ca3af; padding: 6px 7px; vertical-align: top; }
+    .report th { background: #e5e7eb; text-align: left; font-weight: 700; }
+    .number { text-align: right; white-space: nowrap; }
+    .footer { margin-top: 10px; color: #6b7280; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Sold Items / Sales Report</h1>
+  <div class="subtitle">Period: ${escapeHtml(periodLabel)} &nbsp; | &nbsp; Payment: ${escapeHtml(filters.payment_type)}</div>
+  <table class="summary">
+    <tr>
+      <td class="label">Cash Sales</td><td class="number">${escapeHtml(money(totals.cash))}</td>
+      <td class="label">Credit Sales</td><td class="number">${escapeHtml(money(totals.credit))}</td>
+      <td class="label">Total Price</td><td class="number">${escapeHtml(money(totals.totalPrice))}</td>
+    </tr>
+    <tr>
+      <td class="label">Service Charge</td><td class="number">${escapeHtml(money(totals.serviceCharge))}</td>
+      <td class="label">VAT</td><td class="number">${escapeHtml(money(totals.vat))}</td>
+      <td class="label">Grand / Net Total</td><td class="number">${escapeHtml(money(totals.grandTotal))}</td>
+    </tr>
+  </table>
+  <table class="report">
+    <thead>
+      <tr>
+        <th>Order number</th>
+        <th>Waiter name</th>
+        <th>Category</th>
+        <th>Items</th>
+        <th>Quantity</th>
+        <th>Price</th>
+        <th>Total price</th>
+        <th>Payment method</th>
+      </tr>
+    </thead>
+    <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px">No sold items found.</td></tr>'}</tbody>
+  </table>
+  <div class="footer">Printed ${escapeHtml(new Date().toLocaleString())} · ${orderReports.length} filtered orders</div>
+  <script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); };<\/script>
+</body>
+</html>`);
+    printWindow.document.close();
+  };
 
   return (
     <div className="space-y-6">
@@ -750,9 +847,18 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
     const vat = getOrderVat(order);
     const grandTotal = getOrderGrandTotal(order);
 
+    const waiterName = String(
+      (order as any).waiter?.name ??
+        (order as any).waiter_name ??
+        (order as any).waiterName ??
+        (order as any).creator?.name ??
+        "—",
+    );
+
     return {
       id: order.id,
       orderNumber,
+      waiterName,
       createdAt,
       paymentMethod,
       items: itemRows,
@@ -832,15 +938,123 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
   const updateFilter = (patch: Partial<typeof filters>) =>
     setFilters((current) => ({ ...current, ...patch, page: 1 }));
 
+  const printFilteredReport = () => {
+    const escapeHtml = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+    const rows = orderReports
+      .flatMap((order) =>
+        order.items.map((item, itemIndex) => `
+          <tr>
+            ${
+              itemIndex === 0
+                ? `<td rowspan="${order.items.length}">${escapeHtml(order.orderNumber)}</td>
+                   <td rowspan="${order.items.length}">${escapeHtml(order.waiterName)}</td>`
+                : ""
+            }
+            <td>${escapeHtml(item.category)}</td>
+            <td>${escapeHtml(item.itemName)}</td>
+            <td class="number">${escapeHtml(item.qty)}</td>
+            <td class="number">${escapeHtml(money(item.unit))}</td>
+            <td class="number">${escapeHtml(money(item.total))}</td>
+            <td>${escapeHtml(item.paymentMethod)}</td>
+          </tr>`,
+        ),
+      )
+      .join("");
+
+    const periodLabel =
+      filters.period === "custom"
+        ? `${filters.date_from || "Beginning"} to ${filters.date_to || "Today"}`
+        : filters.period.replace(/_/g, " ");
+
+    const printWindow = window.open("", "_blank", "width=1200,height=800");
+    if (!printWindow) return;
+
+    printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Filtered Sold Items Report</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; color: #111827; margin: 0; font-size: 11px; }
+    h1 { margin: 0 0 4px; font-size: 20px; text-align: center; }
+    .subtitle { text-align: center; margin-bottom: 14px; color: #4b5563; text-transform: capitalize; }
+    .summary { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+    .summary td { border: 1px solid #d1d5db; padding: 7px 9px; }
+    .summary .label { font-weight: 700; background: #f3f4f6; }
+    table.report { width: 100%; border-collapse: collapse; }
+    .report th, .report td { border: 1px solid #9ca3af; padding: 6px 7px; vertical-align: top; }
+    .report th { background: #e5e7eb; text-align: left; font-weight: 700; }
+    .number { text-align: right; white-space: nowrap; }
+    .footer { margin-top: 10px; color: #6b7280; font-size: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Sold Items / Sales Report</h1>
+  <div class="subtitle">Period: ${escapeHtml(periodLabel)} &nbsp; | &nbsp; Payment: ${escapeHtml(filters.payment_type)}</div>
+  <table class="summary">
+    <tr>
+      <td class="label">Cash Sales</td><td class="number">${escapeHtml(money(totals.cash))}</td>
+      <td class="label">Credit Sales</td><td class="number">${escapeHtml(money(totals.credit))}</td>
+      <td class="label">Total Price</td><td class="number">${escapeHtml(money(totals.totalPrice))}</td>
+    </tr>
+    <tr>
+      <td class="label">Service Charge</td><td class="number">${escapeHtml(money(totals.serviceCharge))}</td>
+      <td class="label">VAT</td><td class="number">${escapeHtml(money(totals.vat))}</td>
+      <td class="label">Grand / Net Total</td><td class="number">${escapeHtml(money(totals.grandTotal))}</td>
+    </tr>
+  </table>
+  <table class="report">
+    <thead>
+      <tr>
+        <th>Order number</th>
+        <th>Waiter name</th>
+        <th>Category</th>
+        <th>Items</th>
+        <th>Quantity</th>
+        <th>Price</th>
+        <th>Total price</th>
+        <th>Payment method</th>
+      </tr>
+    </thead>
+    <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:20px">No sold items found.</td></tr>'}</tbody>
+  </table>
+  <div class="footer">Printed ${escapeHtml(new Date().toLocaleString())} · ${orderReports.length} filtered orders</div>
+  <script>window.onload = () => { window.print(); window.onafterprint = () => window.close(); };<\/script>
+</body>
+</html>`);
+    printWindow.document.close();
+  };
+
   return (
     <div className="space-y-6">
       <Card className="rounded-2xl">
         <CardHeader className="space-y-4">
-          <div>
-            <CardTitle>Sold items / sales report</CardTitle>
-            <CardDescription>
-              Filter sold order items by period and payment method.
-            </CardDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>Sold items / sales report</CardTitle>
+              <CardDescription>
+                Filter sold order items by period and payment method.
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full sm:w-auto"
+              onClick={printFilteredReport}
+              disabled={query.isLoading || orderReports.length === 0}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print attachment
+            </Button>
           </div>
 
           <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
@@ -938,6 +1152,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Order number</TableHead>
+                  <TableHead>Waiter name</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Quantity</TableHead>
@@ -949,7 +1164,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
               <TableBody>
                 {query.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                       Loading sold items...
                     </TableCell>
                   </TableRow>
@@ -968,6 +1183,11 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
                             </button>
                           </TableCell>
                         )}
+                        {itemIndex === 0 && (
+                          <TableCell rowSpan={order.items.length} className="align-top">
+                            {order.waiterName}
+                          </TableCell>
+                        )}
                         <TableCell className="align-top capitalize">{item.category}</TableCell>
                         <TableCell className="align-top font-medium">{item.itemName}</TableCell>
                         <TableCell className="align-top">{item.qty}</TableCell>
@@ -979,7 +1199,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
                   )
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
                       No sold items found.
                     </TableCell>
                   </TableRow>
@@ -1612,6 +1832,7 @@ export function OrderDetailPage({
     notes: "",
   });
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [ticketPreviewOpen, setTicketPreviewOpen] = useState(false);
   const [paymentPayload, setPaymentPayload] = useState({
     customer_name: "Guest",
     customer_tin: "",
@@ -1828,7 +2049,7 @@ export function OrderDetailPage({
                 {(canManageOrderItems || canCashierPrintTicket || canReceiveOrderPayment || canCashierConfirmOrder || canCashierServeOrder) && (
                   <div className="flex flex-wrap gap-2">
                     {canCashierPrintTicket && (
-                      <Button size="sm" variant="outline" onClick={() => printCustomerOrderTicket(order as any)}>
+                      <Button size="sm" variant="outline" onClick={() => setTicketPreviewOpen(true)}>
                         Print order ticket
                       </Button>
                     )}
@@ -1940,6 +2161,12 @@ export function OrderDetailPage({
               </div>
             </CardContent>
           </Card>
+
+          <OrderTicketPreviewDialog
+            open={ticketPreviewOpen}
+            order={order as any}
+            onOpenChange={setTicketPreviewOpen}
+          />
 
           <Dialog open={itemDialogOpen} onOpenChange={setItemDialogOpen}>
             <DialogContent>

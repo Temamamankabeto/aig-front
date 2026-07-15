@@ -210,6 +210,27 @@ function baseInfo(order?: PrintableOrder) {
   `;
 }
 
+function waiterInfoHtml(order?: PrintableOrder) {
+  const waiter =
+    order?.waiter?.name ??
+    order?.assigned_waiter?.name ??
+    order?.waiter_name ??
+    order?.created_by_user?.name ??
+    order?.creator?.name ??
+    "—";
+
+  return `<div class="meta"><span>Waiter</span><strong>${waiter}</strong></div>`;
+}
+
+function customerTicketHeader() {
+  return `
+    <div class="header customer-header">
+      <div class="brand">${SELLER.name}</div>
+      <div class="subtitle">ORDER TICKET</div>
+    </div>
+  `;
+}
+
 function ratePercent(rate: number) {
   return Number(rate * 100).toFixed((rate * 100) % 1 === 0 ? 0 : 2);
 }
@@ -295,19 +316,18 @@ function qrPlaceholder(order?: PrintableOrder) {
   `;
 }
 
-function printHtml(title: string, body: string) {
-  const win = window.open("", "_blank", "width=420,height=720");
-  if (!win) return;
-
-  win.document.write(`
+function ticketDocumentHtml(title: string, body: string) {
+  return `
     <!doctype html>
     <html>
       <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${title}</title>
         <style>
           @page { size: 80mm auto; margin: 6mm; }
           * { box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; color: #111827; margin: 0; }
+          body { font-family: Arial, sans-serif; color: #111827; margin: 0; background: #fff; }
           .ticket { width: 100%; max-width: 80mm; margin: 0 auto; }
           .header { text-align: center; border-bottom: 1px dashed #9ca3af; padding-bottom: 10px; margin-bottom: 10px; }
           .brand { font-size: 17px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
@@ -328,29 +348,60 @@ function printHtml(title: string, body: string) {
           .unpaid { margin-top: 10px; padding: 7px; border: 1px dashed #ef4444; color: #991b1b; text-align: center; font-weight: 800; font-size: 12px; }
           .qr-box { margin: 12px auto 0; width: 120px; text-align: center; font-size: 10px; }
           .qr-img { width: 110px; height: 110px; margin: 0 auto 4px; display:block; }
-          @media print { .no-print { display: none; } }
+          .customer-ticket { padding: 4mm; }
+          .customer-ticket .customer-header { padding: 5px 0 8px; margin-bottom: 7px; }
+          .customer-ticket .brand { font-size: 15px; }
+          .customer-ticket .subtitle { font-size: 10px; margin-top: 3px; }
+          .customer-ticket .meta { font-size: 10px; padding: 2px 0; }
+          .customer-ticket .section-title { margin-top: 8px; padding-top: 7px; font-size: 10px; }
+          .customer-ticket table { margin-top: 5px; font-size: 10px; }
+          .customer-ticket th { padding: 4px 0; }
+          .customer-ticket td { padding: 4px 0; }
+          .customer-ticket .muted { font-size: 9px; }
+          .customer-ticket .footer { margin-top: 9px; padding-top: 7px; font-size: 9px; }
+          @media print { .no-print { display: none !important; } }
         </style>
       </head>
       <body>${body}</body>
     </html>
-  `);
+  `;
+}
+
+function printHtml(title: string, body: string) {
+  const win = window.open("", "_blank", "width=420,height=720");
+  if (!win) return;
+
+  win.document.open();
+  win.document.write(ticketDocumentHtml(title, body));
   win.document.close();
   win.focus();
   setTimeout(() => win.print(), 250);
 }
 
-export function printCustomerOrderTicket(order?: PrintableOrder) {
+function customerOrderTicketBody(order?: PrintableOrder) {
   const items = orderItems(order);
+
+  return `<div class="ticket customer-ticket">
+    ${customerTicketHeader()}
+    ${baseInfo(order)}
+    ${waiterInfoHtml(order)}
+    <div class="section-title">Ordered Items</div>
+    <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Station</th></tr></thead><tbody>${rowsHtml(items, false)}</tbody></table>
+    <div class="footer">Keep this ticket for pickup and billing.</div>
+  </div>`;
+}
+
+export function getCustomerOrderTicketDocument(order?: PrintableOrder) {
+  return ticketDocumentHtml(
+    `Order Ticket ${orderNumber(order)}`,
+    customerOrderTicketBody(order),
+  );
+}
+
+export function printCustomerOrderTicket(order?: PrintableOrder) {
   printHtml(
     `Order Ticket ${orderNumber(order)}`,
-    `<div class="ticket">
-      ${sellerHeader("ORDER TICKET", "Customer copy - not a VAT receipt")}
-      ${baseInfo(order)}
-      <div class="section-title">Ordered Items</div>
-      <table><thead><tr><th>Item</th><th class="center">Qty</th><th class="right">Station</th></tr></thead><tbody>${rowsHtml(items, false)}</tbody></table>
-      <div class="unpaid">ORDER TICKET - NOT A PAID RECEIPT</div>
-      <div class="footer">Keep this ticket for pickup and billing.</div>
-    </div>`,
+    customerOrderTicketBody(order),
   );
 }
 
