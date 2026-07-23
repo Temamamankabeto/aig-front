@@ -55,6 +55,7 @@ export type OrderFilters = {
   period?: "today" | "this_week" | "this_month" | "this_year" | "custom" | string;
   date_from?: string;
   date_to?: string;
+  waiter_id?: Id;
   credit_account_id?: Id;
   page?: number;
   per_page?: number;

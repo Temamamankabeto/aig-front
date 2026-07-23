@@ -581,11 +581,14 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
     page: 1,
     per_page: 10,
     payment_type: "all",
+    waiter_id: "all",
     period: "today" as Period,
     date_from: "",
     date_to: "",
   });
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const waitersQuery = useWaitersLiteQuery("", scope === "cashier");
+  const waiters = waitersQuery.data ?? [];
 
   const query = useOrdersQuery(
     {
@@ -786,6 +789,16 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
         return false;
       }
 
+      const waiterId = String(
+        (order as any).waiter_id ??
+          (order as any).waiter?.id ??
+          (order as any).assigned_waiter?.id ??
+          "",
+      );
+      if (filters.waiter_id !== "all" && waiterId !== filters.waiter_id) {
+        return false;
+      }
+
       const creditMode = String((order as any).credit_order_mode ?? "").toLowerCase();
       return normalizeOrderItems(order).length > 0 ||
         (paymentMethod === "credit" && creditMode === "beef_based");
@@ -796,6 +809,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
     filters.date_from,
     filters.date_to,
     filters.payment_type,
+    filters.waiter_id,
   ]);
 
   const orderReports = useMemo(
@@ -876,6 +890,11 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
       filters.period === "custom"
         ? `${filters.date_from || "Beginning"} to ${filters.date_to || "Today"}`
         : filters.period.replace(/_/g, " ");
+    const waiterLabel =
+      filters.waiter_id === "all"
+        ? "All waiters"
+        : waiters.find((waiter) => String(waiter.id) === filters.waiter_id)?.name ??
+          `Waiter #${filters.waiter_id}`;
 
     const printWindow = window.open("", "_blank", "width=1200,height=800");
     if (!printWindow) return;
@@ -903,7 +922,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
 </head>
 <body>
   <h1>Sold Items / Sales Report</h1>
-  <div class="subtitle">Period: ${escapeHtml(periodLabel)} &nbsp; | &nbsp; Payment: ${escapeHtml(filters.payment_type)}</div>
+  <div class="subtitle">Period: ${escapeHtml(periodLabel)} &nbsp; | &nbsp; Payment: ${escapeHtml(filters.payment_type)} &nbsp; | &nbsp; Waiter: ${escapeHtml(waiterLabel)}</div>
   <table class="summary">
     <tr>
       <td class="label">Cash Sales</td><td class="number">${escapeHtml(money(totals.cash))}</td>
@@ -946,7 +965,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
             <div>
               <CardTitle>Sold items / sales report</CardTitle>
               <CardDescription>
-                Filter sold order items by period and payment method.
+                Filter sold order items by period, payment method, and waiter.
               </CardDescription>
             </div>
             <Button
@@ -961,7 +980,7 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
             </Button>
           </div>
 
-          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
             <Select
               value={filters.period}
               onValueChange={(period: Period) => updateFilter({ period })}
@@ -991,6 +1010,30 @@ export function SoldItemsReportPage({ scope = "waiter" }: { scope?: Scope }) {
                 <SelectItem value="credit">Credit</SelectItem>
               </SelectContent>
             </Select>
+
+            {scope === "cashier" && (
+              <Select
+                value={filters.waiter_id}
+                onValueChange={(waiter_id) => updateFilter({ waiter_id })}
+                disabled={waitersQuery.isLoading}
+              >
+                <SelectTrigger>
+                  <SelectValue
+                    placeholder={
+                      waitersQuery.isLoading ? "Loading waiters..." : "All waiters"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All waiters</SelectItem>
+                  {waiters.map((waiter) => (
+                    <SelectItem key={waiter.id} value={String(waiter.id)}>
+                      {waiter.name ?? waiter.email ?? `Waiter #${waiter.id}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             <Select
               value={String(filters.per_page)}

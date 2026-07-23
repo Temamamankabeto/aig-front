@@ -10,8 +10,12 @@ const invalidate = (qc: ReturnType<typeof useQueryClient>, key: readonly unknown
   qc.invalidateQueries({ queryKey: key });
 };
 
-export function useWaitersLiteQuery(search = "") {
-  return useQuery({ queryKey: ["order-management", "waiters-lite", search], queryFn: () => orderService.waiters(search) });
+export function useWaitersLiteQuery(search = "", enabled = true) {
+  return useQuery({
+    queryKey: ["order-management", "waiters-lite", search],
+    queryFn: () => orderService.waiters(search),
+    enabled,
+  });
 }
 
 export function useOrdersQuery(filters: OrderFilters = {}, scope: OrderScope = "admin") {
